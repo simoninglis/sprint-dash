@@ -1,0 +1,376 @@
+{% extends "base.html" %}
+
+{% block title %}Board - Sprint Dashboard{% endblock %}
+
+{% block content %}
+<div class="board-container">
+    <!-- Header with filters -->
+    <div class="board-header">
+        <h1>Sprint Board</h1>
+        <div class="board-filters">
+            <select class="board-filter" name="type_filter"
+                    hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
+                <option value="">All types</option>
+                {% for t in all_types %}
+                <option value="{{ t }}" {% if type_filter == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+            </select>
+
+            <select class="board-filter" name="epic_filter"
+                    hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
+                <option value="">All epics</option>
+                {% for e in all_epics %}
+                <option value="{{ e }}" {% if epic_filter == e %}selected{% endif %}>{{ e }}</option>
+                {% endfor %}
+            </select>
+
+            <label class="board-checkbox">
+                <input type="checkbox" class="board-filter" name="show_closed" value="true"
+                       hx-get="/board" hx-target="#board-content" hx-include=".board-filter"
+                       {% if show_closed %}checked{% endif %}>
+                Show closed
+            </label>
+
+            <label class="board-checkbox">
+                <input type="checkbox" class="board-filter" name="group_by_epic" value="true"
+                       hx-get="/board" hx-target="#board-content" hx-include=".board-filter"
+                       {% if group_by_epic %}checked{% endif %}>
+                Group by epic
+            </label>
+
+            <select class="board-filter" name="columns"
+                    hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
+                <option value="3" {% if columns == 3 %}selected{% endif %}>3 columns</option>
+                <option value="4" {% if columns == 4 %}selected{% endif %}>4 columns</option>
+                <option value="5" {% if columns == 5 %}selected{% endif %}>5 columns</option>
+            </select>
+
+            <button class="refresh-btn" hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
+                Refresh
+                <span class="htmx-indicator"><span class="spinner"></span></span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Board columns -->
+    <div id="board-content">
+        {% include "partials/board_content.html" %}
+    </div>
+</div>
+
+<style>
+    /* Override container max-width for board */
+    .board-container {
+        max-width: none;
+        padding: 0 1rem;
+    }
+
+    .board-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        padding: 1rem 0;
+        border-bottom: 1px solid var(--primary);
+    }
+
+    .board-header h1 {
+        margin: 0;
+    }
+
+    .board-filters {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .board-filter {
+        background: var(--primary);
+        border: 1px solid var(--surface);
+        color: var(--text);
+        padding: 0.4rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.85rem;
+    }
+
+    .board-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+    }
+
+    .board-checkbox input {
+        width: auto;
+    }
+
+    .refresh-btn {
+        background: var(--accent);
+        border: none;
+        color: var(--text);
+        padding: 0.4rem 1rem;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .refresh-btn:hover {
+        opacity: 0.9;
+    }
+
+    /* Board grid */
+    .board-grid {
+        display: grid;
+        grid-template-columns: repeat({{ columns }}, 1fr);
+        gap: 1rem;
+        min-height: calc(100vh - 200px);
+    }
+
+    /* Column styles */
+    .board-column {
+        background: var(--surface);
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        min-height: 400px;
+        max-height: calc(100vh - 220px);
+    }
+
+    .column-header {
+        padding: 1rem;
+        border-bottom: 1px solid var(--primary);
+        position: sticky;
+        top: 0;
+        background: var(--surface);
+        border-radius: 8px 8px 0 0;
+        z-index: 1;
+    }
+
+    .column-title {
+        font-weight: 600;
+        font-size: 1rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .column-stats {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+
+    .column-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.75rem;
+    }
+
+    /* Card styles */
+    .board-card {
+        background: var(--bg);
+        border-radius: 6px;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+        border-left: 3px solid transparent;
+        cursor: pointer;
+        transition: transform 0.1s, box-shadow 0.1s;
+    }
+
+    .board-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .board-card.card-open {
+        border-left-color: var(--warning);
+    }
+
+    .board-card.card-closed {
+        border-left-color: var(--success);
+        opacity: 0.7;
+    }
+
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .card-number {
+        font-family: monospace;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+
+    .card-badges {
+        display: flex;
+        gap: 0.25rem;
+        flex-wrap: wrap;
+    }
+
+    .card-title {
+        font-size: 0.85rem;
+        line-height: 1.3;
+        margin-bottom: 0.5rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .card-meta {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    /* Mini badges for cards */
+    .mini-badge {
+        font-size: 0.65rem;
+        padding: 0.15rem 0.35rem;
+        border-radius: 3px;
+        font-weight: 600;
+    }
+
+    .mini-badge.priority-1 { background: #ef4444; }
+    .mini-badge.priority-2 { background: #f97316; }
+    .mini-badge.priority-3 { background: #eab308; color: #000; }
+
+    .mini-badge.size-s { background: #22c55e; color: #000; }
+    .mini-badge.size-m { background: #eab308; color: #000; }
+    .mini-badge.size-l { background: #f97316; color: #000; }
+    .mini-badge.size-xl { background: #ef4444; }
+
+    .mini-badge.type-bug { background: #ef4444; }
+    .mini-badge.type-feature { background: #3b82f6; }
+    .mini-badge.type-tech-debt { background: #8b5cf6; }
+    .mini-badge.type-chore { background: #6b7280; }
+
+    .mini-badge.ready { background: var(--success); color: #000; }
+    .mini-badge.epic {
+        background: var(--primary);
+        border: 1px solid var(--accent);
+        cursor: pointer;
+    }
+    .mini-badge.epic:hover {
+        background: var(--accent);
+    }
+
+    /* Epic color rail (top bar) */
+    .card-epic-rail {
+        height: 4px;
+        background: var(--epic-color, transparent);
+        margin: -0.75rem -0.75rem 0.5rem -0.75rem;
+        border-radius: 6px 6px 0 0;
+    }
+
+    /* Blocked card styling */
+    .board-card.card-blocked {
+        border-left-color: #ef4444;
+    }
+
+    .card-blocked-banner {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 0.2rem 0.5rem;
+        margin: -0.75rem -0.75rem 0.5rem -0.75rem;
+        border-radius: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+    }
+
+    .card-epic-rail + .card-blocked-banner {
+        margin-top: -0.5rem;
+        border-radius: 0;
+    }
+
+    .blocked-icon {
+        font-size: 0.8rem;
+    }
+
+    /* Dependency badges */
+    .card-deps {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--primary);
+    }
+
+    .dep-badge {
+        font-size: 0.7rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .dep-badge.dep-blocked {
+        background: rgba(239, 68, 68, 0.2);
+        color: #ef4444;
+    }
+
+    .dep-badge.dep-blocks {
+        background: rgba(59, 130, 246, 0.2);
+        color: #3b82f6;
+    }
+
+    /* Column blocked count */
+    .column-blocked-count {
+        color: #ef4444;
+        font-size: 0.75rem;
+        margin-left: 0.5rem;
+    }
+
+    /* Backlog column special styling */
+    .board-column.backlog-column .column-header {
+        background: linear-gradient(135deg, var(--surface) 0%, rgba(233, 69, 96, 0.1) 100%);
+    }
+
+    /* Current sprint highlight */
+    .board-column.current-sprint .column-header {
+        background: linear-gradient(135deg, var(--surface) 0%, rgba(74, 222, 128, 0.1) 100%);
+    }
+
+    /* Empty column state */
+    .column-empty {
+        text-align: center;
+        padding: 2rem 1rem;
+        color: var(--text-muted);
+        font-size: 0.85rem;
+    }
+
+    /* Progress bar in column header */
+    .column-progress {
+        height: 4px;
+        background: var(--primary);
+        border-radius: 2px;
+        margin-top: 0.5rem;
+        overflow: hidden;
+    }
+
+    .column-progress-fill {
+        height: 100%;
+        background: var(--success);
+        transition: width 0.3s;
+    }
+
+    /* Responsive */
+    @media (max-width: 1200px) {
+        .board-grid {
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        }
+    }
+</style>
+{% endblock %}

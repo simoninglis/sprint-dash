@@ -234,6 +234,7 @@
         <nav class="container">
             <span class="logo">Sprint Dashboard</span>
             <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Home</a>
+            <a href="/board" {% if request.url.path == "/board" %}class="active"{% endif %}>Board</a>
             <a href="/sprints" {% if "/sprints" in request.url.path %}class="active"{% endif %}>Sprints</a>
             <a href="/backlog" {% if request.url.path == "/backlog" %}class="active"{% endif %}>Backlog</a>
             <a href="/search" {% if request.url.path == "/search" %}class="active"{% endif %}>Search</a>

@@ -1,0 +1,19 @@
+<div class="column-header">
+    <div class="column-title">{{ column_title }}</div>
+    <div class="column-stats">{{ column_stats }}</div>
+</div>
+<div class="column-body">
+    {% if issues %}
+        {% for issue in issues %}
+        {% include "partials/board_card.html" %}
+        {% endfor %}
+    {% else %}
+        <div class="column-empty">
+            {% if show_closed %}
+            No issues
+            {% else %}
+            No open issues
+            {% endif %}
+        </div>
+    {% endif %}
+</div>

@@ -1,0 +1,179 @@
+<div class="board-grid" style="grid-template-columns: repeat({{ columns }}, 1fr);">
+    <!-- Backlog Column (Ready Queue) -->
+    <div class="board-column backlog-column">
+        <div class="column-header">
+            <div class="column-title">Backlog (Ready)</div>
+            <div class="column-stats">
+                {{ ready_backlog|length }} issues
+                (~{{ ready_backlog|sum(attribute='points') }} pts)
+                {% if backlog_blocked_count > 0 %}
+                <span class="column-blocked-count">&#x26D4; {{ backlog_blocked_count }} blocked</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="column-body">
+            {% if ready_backlog %}
+                {% if group_by_epic %}
+                    {% set epics_seen = {} %}
+                    {% for issue in ready_backlog %}
+                        {% set epic_name = issue.epic or "No Epic" %}
+                        {% if epic_name not in epics_seen %}
+                            {% set _ = epics_seen.update({epic_name: true}) %}
+                            <details class="epic-group" open>
+                                <summary class="epic-group-header" style="--epic-color: {{ issue.epic_color }};">
+                                    {{ epic_name }}
+                                    <span class="epic-group-count">
+                                        ({{ ready_backlog|selectattr('epic', 'equalto', issue.epic)|list|length if issue.epic else ready_backlog|selectattr('epic', 'none')|list|length }})
+                                    </span>
+                                </summary>
+                                <div class="epic-group-body">
+                                    {% for grouped_issue in ready_backlog %}
+                                        {% if (grouped_issue.epic or "No Epic") == epic_name %}
+                                            {% with issue=grouped_issue %}
+                                            {% include "partials/board_card.html" %}
+                                            {% endwith %}
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                            </details>
+                        {% endif %}
+                    {% endfor %}
+                {% else %}
+                    {% for issue in ready_backlog %}
+                    {% include "partials/board_card.html" %}
+                    {% endfor %}
+                {% endif %}
+            {% else %}
+                <div class="column-empty">No ready issues in backlog</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Sprint Columns -->
+    {% for sprint, issues, blocked_count in sprint_columns %}
+    <div class="board-column {% if sprint.number == current_sprint_num %}current-sprint{% endif %}">
+        <div class="column-header">
+            <div class="column-title">
+                Sprint {{ sprint.number }}
+                {% if sprint.number == current_sprint_num %}
+                <span style="color: var(--success); font-size: 0.75rem;">(current)</span>
+                {% endif %}
+            </div>
+            <div class="column-stats">
+                {{ sprint.closed_count }}/{{ sprint.total }} done ({{ sprint.progress_pct }}%)
+                <span style="margin-left: 0.5rem; color: var(--text-muted);">
+                    ~{{ sprint.total_points }} pts
+                </span>
+                {% if blocked_count > 0 %}
+                <span class="column-blocked-count">&#x26D4; {{ blocked_count }} blocked</span>
+                {% endif %}
+            </div>
+            <div class="column-progress">
+                <div class="column-progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
+            </div>
+        </div>
+        <div class="column-body">
+            {% if issues %}
+                {% if group_by_epic %}
+                    {% set epics_seen = {} %}
+                    {% for issue in issues %}
+                        {% set epic_name = issue.epic or "No Epic" %}
+                        {% if epic_name not in epics_seen %}
+                            {% set _ = epics_seen.update({epic_name: true}) %}
+                            <details class="epic-group" open>
+                                <summary class="epic-group-header" style="--epic-color: {{ issue.epic_color }};">
+                                    {{ epic_name }}
+                                    <span class="epic-group-count">
+                                        ({{ issues|selectattr('epic', 'equalto', issue.epic)|list|length if issue.epic else issues|selectattr('epic', 'none')|list|length }})
+                                    </span>
+                                </summary>
+                                <div class="epic-group-body">
+                                    {% for grouped_issue in issues %}
+                                        {% if (grouped_issue.epic or "No Epic") == epic_name %}
+                                            {% with issue=grouped_issue %}
+                                            {% include "partials/board_card.html" %}
+                                            {% endwith %}
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                            </details>
+                        {% endif %}
+                    {% endfor %}
+                {% else %}
+                    {% for issue in issues %}
+                    {% include "partials/board_card.html" %}
+                    {% endfor %}
+                {% endif %}
+            {% else %}
+                <div class="column-empty">
+                    {% if show_closed %}
+                    No issues in this sprint
+                    {% else %}
+                    No open issues
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+
+    <!-- Empty columns if needed -->
+    {% set shown_columns = 1 + sprint_columns|length %}
+    {% for i in range(columns - shown_columns) %}
+    <div class="board-column">
+        <div class="column-header">
+            <div class="column-title">Sprint {{ (current_sprint_num or 0) + sprint_columns|length + i + 1 }}</div>
+            <div class="column-stats">Planning</div>
+        </div>
+        <div class="column-body">
+            <div class="column-empty">
+                No sprint created yet
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<style>
+    /* Epic grouping styles */
+    .epic-group {
+        margin-bottom: 0.75rem;
+    }
+
+    .epic-group-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem;
+        background: var(--primary);
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 600;
+        border-left: 3px solid var(--epic-color, var(--text-muted));
+        list-style: none;
+    }
+
+    .epic-group-header::-webkit-details-marker {
+        display: none;
+    }
+
+    .epic-group-header::before {
+        content: "▶";
+        font-size: 0.7rem;
+        transition: transform 0.2s;
+    }
+
+    .epic-group[open] .epic-group-header::before {
+        transform: rotate(90deg);
+    }
+
+    .epic-group-count {
+        color: var(--text-muted);
+        font-weight: normal;
+    }
+
+    .epic-group-body {
+        padding-top: 0.5rem;
+    }
+</style>

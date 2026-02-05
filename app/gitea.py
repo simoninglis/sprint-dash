@@ -26,6 +26,37 @@ PAGE_LIMIT = 50
 # Size to points mapping for capacity estimation
 SIZE_POINTS: dict[str, int] = {"S": 1, "M": 3, "L": 5, "XL": 8}
 
+# Epic color palette (low-chroma colors for dark theme)
+EPIC_COLORS: list[str] = [
+    "#3b82f6",  # blue
+    "#8b5cf6",  # purple
+    "#06b6d4",  # cyan
+    "#f59e0b",  # amber
+    "#10b981",  # emerald
+    "#ec4899",  # pink
+    "#6366f1",  # indigo
+    "#14b8a6",  # teal
+]
+
+# Cache for dependency counts (issue_number -> (blocked_by_count, blocks_count, blockers_list))
+_deps_cache: TTLCache[int, tuple[int, int, list[tuple[int, str, int | None]]]] = TTLCache(
+    maxsize=500, ttl=60
+)
+
+# Cache for epic -> color mapping (built per board load)
+_epic_colors: dict[str, str] = {}
+
+
+def get_epic_color(epic_name: str | None) -> str:
+    """Get a consistent color for an epic."""
+    if not epic_name:
+        return "transparent"
+    if epic_name not in _epic_colors:
+        # Assign next available color
+        idx = len(_epic_colors) % len(EPIC_COLORS)
+        _epic_colors[epic_name] = EPIC_COLORS[idx]
+    return _epic_colors[epic_name]
+
 
 def _get_ssl_verify() -> bool | str:
     """Get SSL verification setting.
@@ -164,6 +195,71 @@ class Dependency:
     @property
     def is_closed(self) -> bool:
         return self.state == "closed"
+
+
+@dataclass
+class BoardIssue:
+    """Issue wrapper with dependency info for board display."""
+
+    issue: "Issue"
+    blocked_by_count: int = 0
+    blocks_count: int = 0
+    # List of (issue_number, state, sprint_number) for blockers
+    blockers: list[tuple[int, str, int | None]] = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.blockers is None:
+            self.blockers = []
+
+    @property
+    def is_blocked(self) -> bool:
+        """True if blocked by any open issues."""
+        return any(state == "open" for _, state, _ in self.blockers)
+
+    @property
+    def open_blocker_count(self) -> int:
+        """Count of open blockers."""
+        return sum(1 for _, state, _ in self.blockers if state == "open")
+
+    @property
+    def blocker_context(self) -> str:
+        """Get sprint context for blockers (S-1, S0, S+1, BL)."""
+        if not self.blockers:
+            return ""
+        current_sprint = self.issue.sprint
+        contexts = []
+        for _, state, blocker_sprint in self.blockers:
+            if state != "open":
+                continue
+            if blocker_sprint is None:
+                contexts.append("BL")
+            elif current_sprint is None:
+                contexts.append(f"S{blocker_sprint}")
+            elif blocker_sprint < current_sprint:
+                contexts.append("S-1")
+            elif blocker_sprint == current_sprint:
+                contexts.append("S0")
+            else:
+                contexts.append("S+1")
+        # Return most relevant context
+        if "S-1" in contexts:
+            return "S-1"
+        if "BL" in contexts:
+            return "BL"
+        if "S0" in contexts:
+            return "S0"
+        if "S+1" in contexts:
+            return "S+1"
+        return ""
+
+    @property
+    def epic_color(self) -> str:
+        """Get the color for this issue's epic."""
+        return get_epic_color(self.issue.epic)
+
+    # Delegate common properties to the wrapped issue
+    def __getattr__(self, name: str):
+        return getattr(self.issue, name)
 
 
 @dataclass(frozen=True)
@@ -316,6 +412,37 @@ class BacklogStats:
         if None in by_epic:
             result.append((None, by_epic[None]))
         return result
+
+
+@dataclass
+class BoardData:
+    """Data for the sprint board view."""
+
+    backlog: list[Issue]
+    sprints: list[Sprint]
+    current_sprint_num: int | None
+
+    @property
+    def current_sprint(self) -> Sprint | None:
+        """Get current (highest numbered) sprint."""
+        for s in self.sprints:
+            if s.number == self.current_sprint_num:
+                return s
+        return self.sprints[0] if self.sprints else None
+
+    def get_sprint(self, number: int) -> Sprint | None:
+        """Get sprint by number."""
+        for s in self.sprints:
+            if s.number == number:
+                return s
+        return None
+
+    @property
+    def next_sprints(self) -> list[Sprint]:
+        """Get sprints after current (for planning columns)."""
+        if not self.current_sprint_num:
+            return []
+        return [s for s in self.sprints if s.number > self.current_sprint_num]
 
 
 # --- Gitea Client ---
@@ -601,6 +728,95 @@ class GiteaClient:
             raise GiteaError(f"Gitea API error: {e.response.status_code}") from e
         except httpx.RequestError as e:
             raise GiteaError(f"Network error: {e}") from e
+
+    def get_dependency_info(
+        self, number: int
+    ) -> tuple[int, int, list[tuple[int, str, int | None]]]:
+        """Get cached dependency counts and blocker info for an issue.
+
+        Returns:
+            Tuple of (blocked_by_count, blocks_count, blockers_list)
+            where blockers_list is [(issue_num, state, sprint_num), ...]
+        """
+        if number in _deps_cache:
+            return _deps_cache[number]
+
+        try:
+            deps = self.get_issue_dependencies(number)
+            blocks = self.get_issue_blocks(number)
+
+            blockers = [(d.number, d.state, d.sprint) for d in deps]
+            result = (len(deps), len(blocks), blockers)
+
+            _deps_cache[number] = result
+            return result
+        except GiteaError:
+            # On error, return empty deps
+            return (0, 0, [])
+
+    def to_board_issue(self, issue: Issue, fetch_deps: bool = True) -> BoardIssue:
+        """Convert an Issue to a BoardIssue with dependency info."""
+        if fetch_deps:
+            blocked_by, blocks, blockers = self.get_dependency_info(issue.number)
+            return BoardIssue(
+                issue=issue,
+                blocked_by_count=blocked_by,
+                blocks_count=blocks,
+                blockers=blockers,
+            )
+        return BoardIssue(issue=issue)
+
+    def to_board_issues(
+        self, issues: list[Issue], fetch_deps: bool = True
+    ) -> list[BoardIssue]:
+        """Convert a list of Issues to BoardIssues."""
+        return [self.to_board_issue(issue, fetch_deps) for issue in issues]
+
+    def get_board_data(self, num_future_sprints: int = 2) -> BoardData:
+        """Get all data needed for board view in a single fetch.
+
+        Efficiently loads all issues once and groups them for the board.
+
+        Args:
+            num_future_sprints: How many sprints beyond current to show
+
+        Returns:
+            BoardData with backlog and sprints organized for board display
+        """
+        # Single fetch for all issues (uses cache)
+        all_issues = self._get_issues(state="all")
+
+        # Group by sprint
+        sprint_map: dict[int, list[Issue]] = {}
+        backlog: list[Issue] = []
+
+        for issue in all_issues:
+            if issue.sprint is not None:
+                sprint_map.setdefault(issue.sprint, []).append(issue)
+            elif issue.state == "open":
+                # Only open issues in backlog
+                backlog.append(issue)
+
+        # Build sprint objects
+        sprints = [
+            Sprint(number=num, issues=tuple(issues))
+            for num, issues in sorted(sprint_map.items(), reverse=True)
+        ]
+
+        # Current sprint is highest numbered with open issues, or just highest
+        current_num = None
+        for s in sprints:
+            if s.open_count > 0:
+                current_num = s.number
+                break
+        if current_num is None and sprints:
+            current_num = sprints[0].number
+
+        return BoardData(
+            backlog=backlog,
+            sprints=sprints,
+            current_sprint_num=current_num,
+        )
 
 
 @lru_cache

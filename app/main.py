@@ -39,6 +39,161 @@ async def home(request: Request):
     )
 
 
+def _sort_board_issues(issues: list, show_closed: bool = False) -> list:
+    """Sort issues for board display: open first, then priority, size, age."""
+    # Filter closed if needed
+    if not show_closed:
+        issues = [i for i in issues if i.state == "open"]
+
+    # Sort: open first, then P1→P3→None, then L→S→None, then oldest first
+    def sort_key(issue):
+        state_order = 0 if issue.state == "open" else 1
+        priority_order = issue.priority if issue.priority else 99
+        size_order = {"XL": 0, "L": 1, "M": 2, "S": 3}.get(issue.size, 99)
+        return (state_order, priority_order, size_order, issue.created_at)
+
+    return sorted(issues, key=sort_key)
+
+
+@app.get("/board", response_class=HTMLResponse)
+async def board(
+    request: Request,
+    columns: int = Query(default=4, ge=3, le=5),
+    show_closed: bool = Query(default=False),
+    type_filter: str = Query(default=""),
+    epic_filter: str = Query(default=""),
+    group_by_epic: bool = Query(default=False),
+):
+    """Sprint board view - Kanban-style columns."""
+    try:
+        client = get_client()
+        board_data = client.get_board_data()
+    except (GiteaError, ConfigError) as e:
+        return templates.TemplateResponse(
+            "partials/error.html", {"request": request, "error": str(e)}
+        )
+
+    # Apply filters to backlog
+    backlog = board_data.backlog
+    if type_filter:
+        backlog = [i for i in backlog if i.issue_type == type_filter]
+    if epic_filter:
+        backlog = [i for i in backlog if i.epic == epic_filter]
+
+    # Get ready-only backlog for the board
+    ready_backlog = [i for i in backlog if i.is_ready]
+    ready_backlog = _sort_board_issues(ready_backlog, show_closed)
+    # Convert to BoardIssues with dependency info
+    ready_backlog_board = client.to_board_issues(ready_backlog)
+
+    # Count blocked issues in backlog
+    backlog_blocked_count = sum(1 for bi in ready_backlog_board if bi.is_blocked)
+
+    # Determine which sprints to show
+    current = board_data.current_sprint
+    sprint_columns = []
+
+    if current:
+        sprint_columns.append(current)
+        # Add future sprints
+        future = [s for s in board_data.sprints if s.number > current.number]
+        future.sort(key=lambda s: s.number)
+        sprint_columns.extend(future[: columns - 2])  # -2 for backlog + current
+
+    # Sort issues within each sprint and convert to BoardIssues
+    sorted_sprint_columns = []
+    for sprint in sprint_columns:
+        issues = list(sprint.issues)
+        if type_filter:
+            issues = [i for i in issues if i.issue_type == type_filter]
+        if epic_filter:
+            issues = [i for i in issues if i.epic == epic_filter]
+        sorted_issues = _sort_board_issues(issues, show_closed)
+        board_issues = client.to_board_issues(sorted_issues)
+        blocked_count = sum(1 for bi in board_issues if bi.is_blocked)
+        sorted_sprint_columns.append((sprint, board_issues, blocked_count))
+
+    # Get filter options
+    all_issues = board_data.backlog + [i for s in board_data.sprints for i in s.issues]
+    all_types = sorted({i.issue_type for i in all_issues if i.issue_type != "unknown"})
+    all_epics = sorted({i.epic for i in all_issues if i.epic})
+
+    context = {
+        "request": request,
+        "ready_backlog": ready_backlog_board,
+        "backlog_blocked_count": backlog_blocked_count,
+        "sprint_columns": sorted_sprint_columns,
+        "current_sprint_num": board_data.current_sprint_num,
+        "columns": columns,
+        "show_closed": show_closed,
+        "type_filter": type_filter,
+        "epic_filter": epic_filter,
+        "group_by_epic": group_by_epic,
+        "all_types": all_types,
+        "all_epics": all_epics,
+    }
+
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse("partials/board_content.html", context)
+
+    return templates.TemplateResponse("board.html", context)
+
+
+@app.get("/board/column/{column_type}", response_class=HTMLResponse)
+async def board_column(
+    request: Request,
+    column_type: str,
+    sprint_num: int = Query(default=0),
+    show_closed: bool = Query(default=False),
+    type_filter: str = Query(default=""),
+    epic_filter: str = Query(default=""),
+):
+    """Lazy-load a single board column."""
+    try:
+        client = get_client()
+        board_data = client.get_board_data()
+    except (GiteaError, ConfigError) as e:
+        return templates.TemplateResponse(
+            "partials/error.html", {"request": request, "error": str(e)}
+        )
+
+    issues = []
+    column_title = ""
+    column_stats = ""
+
+    if column_type == "backlog":
+        issues = [i for i in board_data.backlog if i.is_ready]
+        column_title = "Backlog (Ready)"
+        total_pts = sum(i.points for i in issues)
+        column_stats = f"{len(issues)} issues (~{total_pts} pts)"
+    elif column_type == "sprint" and sprint_num:
+        sprint = board_data.get_sprint(sprint_num)
+        if sprint:
+            issues = list(sprint.issues)
+            is_current = sprint_num == board_data.current_sprint_num
+            column_title = f"Sprint {sprint_num}" + (" (current)" if is_current else "")
+            column_stats = f"{sprint.closed_count}/{sprint.total} done ({sprint.progress_pct}%)"
+
+    # Apply filters
+    if type_filter:
+        issues = [i for i in issues if i.issue_type == type_filter]
+    if epic_filter:
+        issues = [i for i in issues if i.epic == epic_filter]
+
+    issues = _sort_board_issues(issues, show_closed)
+
+    return templates.TemplateResponse(
+        "partials/board_column.html",
+        {
+            "request": request,
+            "issues": issues,
+            "column_title": column_title,
+            "column_stats": column_stats,
+            "show_closed": show_closed,
+        },
+    )
+
+
 @app.get("/sprints", response_class=HTMLResponse)
 async def sprints_list(request: Request):
     """List all sprints."""
