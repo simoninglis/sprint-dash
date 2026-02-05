@@ -1,0 +1,37 @@
+{% if view == "epic" %}
+<!-- Epic Grouped View -->
+{% for epic_name, epic_issues in stats.epics_sorted %}
+<div class="epic-group">
+    <div class="epic-header">
+        <span class="epic-name">
+            {% if epic_name %}
+            {{ epic_name }}
+            {% else %}
+            No Epic
+            {% endif %}
+        </span>
+        <span class="epic-stats">
+            {{ epic_issues|length }} issues
+            (~{{ epic_issues|sum(attribute='points') }} pts)
+        </span>
+    </div>
+    <div class="epic-issues">
+        {% with issues=epic_issues %}
+        {% include "partials/backlog_issue_row.html" %}
+        {% endwith %}
+    </div>
+</div>
+{% else %}
+<div class="empty-state">No issues match the current filters.</div>
+{% endfor %}
+
+{% else %}
+<!-- List View -->
+<div class="card">
+    {% if issues %}
+    {% include "partials/backlog_issue_row.html" %}
+    {% else %}
+    <div class="empty-state">No issues match the current filters.</div>
+    {% endif %}
+</div>
+{% endif %}

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+
+{% block title %}#{{ issue.number }} {{ issue.title }} - Sprint Dashboard{% endblock %}
+
+{% block content %}
+{% include "partials/issue_detail.html" %}
+{% endblock %}

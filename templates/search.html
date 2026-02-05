@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Search - Sprint Dashboard{% endblock %}
+
+{% block content %}
+<h1>Search Issues</h1>
+
+<div class="card">
+    <div class="search-box" style="position: relative;">
+        <input type="search"
+               name="q"
+               value="{{ query }}"
+               placeholder="Search issues by title..."
+               hx-get="/issues"
+               hx-trigger="keyup changed delay:300ms, search"
+               hx-target="#results"
+               hx-include="[name='label'], [name='state']"
+               hx-indicator="#search-spinner">
+        <span id="search-spinner" class="htmx-indicator" style="position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%);">
+            <div class="spinner"></div>
+        </span>
+    </div>
+
+    <div class="filters">
+        <span style="color: var(--text-muted); margin-right: 0.5rem;">Filter:</span>
+        <button class="filter-btn"
+                hx-get="/issues?label="
+                hx-target="#results"
+                hx-include="[name='q'], [name='state']"
+                hx-indicator="#filter-spinner">All</button>
+        <button class="filter-btn"
+                hx-get="/issues?label=bug"
+                hx-target="#results"
+                hx-include="[name='q'], [name='state']"
+                hx-indicator="#filter-spinner">Bugs</button>
+        <button class="filter-btn"
+                hx-get="/issues?label=feature"
+                hx-target="#results"
+                hx-include="[name='q'], [name='state']"
+                hx-indicator="#filter-spinner">Features</button>
+        <button class="filter-btn"
+                hx-get="/issues?label=tech-debt"
+                hx-target="#results"
+                hx-include="[name='q'], [name='state']"
+                hx-indicator="#filter-spinner">Tech Debt</button>
+
+        <select name="state"
+                hx-get="/issues"
+                hx-target="#results"
+                hx-include="[name='q'], [name='label']"
+                hx-indicator="#filter-spinner"
+                style="width: auto; margin-left: auto;">
+            <option value="all">All States</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+        </select>
+        <span id="filter-spinner" class="htmx-indicator"><div class="spinner"></div></span>
+
+        <input type="hidden" name="label" value="">
+    </div>
+
+    <div id="results">
+        {% include "partials/issue_list.html" %}
+    </div>
+</div>
+
+<script>
+// Update hidden label input when filter button clicked
+document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const url = new URL(btn.getAttribute('hx-get'), window.location);
+        document.querySelector('[name="label"]').value = url.searchParams.get('label') || '';
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    });
+});
+</script>
+{% endblock %}

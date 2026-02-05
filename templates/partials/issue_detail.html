@@ -1,0 +1,305 @@
+<div class="issue-header">
+    <a href="javascript:history.back()" class="back-link">&larr; Back</a>
+    <h1>
+        <span class="issue-number">#{{ issue.number }}</span>
+        {{ issue.title }}
+    </h1>
+    <div class="issue-meta">
+        <span class="badge badge-{{ issue.state }}">{{ issue.state }}</span>
+        <span class="badge badge-{{ issue.issue_type }}">{{ issue.issue_type }}</span>
+        {% for label in issue.labels %}
+            {% if not label.startswith('sprint/') and label not in ['bug', 'feature', 'tech-debt', 'chore', 'docs', 'ready'] %}
+            <span class="badge">{{ label }}</span>
+            {% endif %}
+        {% endfor %}
+        {% if issue.sprint %}
+        <span class="badge badge-sprint">Sprint {{ issue.sprint }}</span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Dependencies Section -->
+{% if depends_on or blocks %}
+<div class="card dependencies-card">
+    <div class="card-header">
+        <h2>Dependencies</h2>
+    </div>
+
+    {% if depends_on %}
+    <div class="dep-section">
+        <h3 class="dep-heading dep-blocked-by">
+            <span class="dep-icon">&#x26A0;</span>
+            Blocked by ({{ depends_on|length }})
+        </h3>
+        <ul class="dep-list">
+            {% for dep in depends_on %}
+            <li class="dep-item {% if dep.is_closed %}dep-resolved{% endif %}">
+                <span class="dep-status">
+                    {% if dep.is_closed %}&#x2714;{% else %}&#x23F3;{% endif %}
+                </span>
+                <a href="/issues/{{ dep.number }}" class="dep-link">
+                    #{{ dep.number }}
+                </a>
+                <span class="dep-title">{{ dep.title }}</span>
+                <span class="badge badge-{{ dep.state }}">{{ dep.state }}</span>
+                {% if dep.sprint %}
+                <span class="badge badge-sprint-sm">sprint/{{ dep.sprint }}</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% if depends_on|selectattr('is_open')|list|length > 0 %}
+        <p class="dep-warning">
+            &#x26A0; This issue is blocked by {{ depends_on|selectattr('is_open')|list|length }} open issue(s)
+        </p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if blocks %}
+    <div class="dep-section">
+        <h3 class="dep-heading dep-blocks">
+            <span class="dep-icon">&#x1F6A7;</span>
+            Blocks ({{ blocks|length }})
+        </h3>
+        <ul class="dep-list">
+            {% for dep in blocks %}
+            <li class="dep-item">
+                <a href="/issues/{{ dep.number }}" class="dep-link">
+                    #{{ dep.number }}
+                </a>
+                <span class="dep-title">{{ dep.title }}</span>
+                <span class="badge badge-{{ dep.state }}">{{ dep.state }}</span>
+                {% if dep.sprint %}
+                <span class="badge badge-sprint-sm">sprint/{{ dep.sprint }}</span>
+                {% else %}
+                <span class="badge" style="background: var(--text-muted);">backlog</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">
+        <h2>Description</h2>
+        <span class="text-muted">Created {{ issue.created_at[:10] }}</span>
+    </div>
+    <div class="issue-body">
+        {% if issue.body %}
+        <pre class="markdown-body">{{ issue.body }}</pre>
+        {% else %}
+        <p class="empty-state">No description provided.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Comments</h2>
+        <span class="text-muted">{{ comments|length }} comment{% if comments|length != 1 %}s{% endif %}</span>
+    </div>
+
+    {% if comments %}
+    <div class="comments-list">
+        {% for comment in comments %}
+        <div class="comment">
+            <div class="comment-header">
+                <span class="comment-author">{{ comment.user }}</span>
+                <span class="comment-date">{{ comment.created_at[:10] }}</span>
+            </div>
+            <div class="comment-body">
+                <pre class="markdown-body">{{ comment.body }}</pre>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No comments yet.</p>
+    {% endif %}
+</div>
+
+<style>
+    .issue-header {
+        margin-bottom: 1.5rem;
+    }
+
+    .issue-header h1 {
+        margin: 0.5rem 0;
+    }
+
+    .issue-header .issue-number {
+        color: var(--text-muted);
+        font-weight: normal;
+    }
+
+    .issue-meta {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.5rem;
+    }
+
+    .back-link {
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.875rem;
+    }
+
+    .back-link:hover {
+        color: var(--accent);
+    }
+
+    .text-muted {
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+
+    .badge-sprint {
+        background: var(--primary);
+        border: 1px solid var(--accent);
+    }
+
+    .issue-body, .comment-body {
+        margin-top: 1rem;
+    }
+
+    .markdown-body {
+        font-family: inherit;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        background: var(--bg);
+        padding: 1rem;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        line-height: 1.6;
+        overflow-x: auto;
+    }
+
+    .comments-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .comment {
+        border-left: 3px solid var(--primary);
+        padding-left: 1rem;
+    }
+
+    .comment-header {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+
+    .comment-author {
+        font-weight: 600;
+        color: var(--accent);
+    }
+
+    .comment-date {
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+
+    /* Dependencies styles */
+    .dependencies-card {
+        border-left: 3px solid var(--warning);
+    }
+
+    .dep-section {
+        margin-bottom: 1rem;
+    }
+
+    .dep-section:last-child {
+        margin-bottom: 0;
+    }
+
+    .dep-heading {
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .dep-icon {
+        font-size: 1rem;
+    }
+
+    .dep-blocked-by {
+        color: var(--warning);
+    }
+
+    .dep-blocks {
+        color: var(--text-muted);
+    }
+
+    .dep-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .dep-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--primary);
+    }
+
+    .dep-item:last-child {
+        border-bottom: none;
+    }
+
+    .dep-item.dep-resolved {
+        opacity: 0.6;
+    }
+
+    .dep-status {
+        font-size: 1rem;
+        width: 1.5rem;
+        text-align: center;
+    }
+
+    .dep-link {
+        color: var(--accent);
+        text-decoration: none;
+        font-family: monospace;
+        font-weight: 600;
+    }
+
+    .dep-link:hover {
+        text-decoration: underline;
+    }
+
+    .dep-title {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .dep-warning {
+        margin-top: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        background: rgba(251, 191, 36, 0.1);
+        border-left: 3px solid var(--warning);
+        font-size: 0.85rem;
+        color: var(--warning);
+    }
+
+    .badge-sprint-sm {
+        background: var(--primary);
+        border: 1px solid var(--accent);
+        font-size: 0.65rem;
+        padding: 0.15rem 0.4rem;
+    }
+</style>

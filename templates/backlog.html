@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}Backlog - Sprint Dashboard{% endblock %}
+
+{% block content %}
+<div class="backlog-header">
+    <h1>Backlog</h1>
+    <div class="backlog-summary">
+        <span class="summary-item">
+            <strong>{{ ready_stats.total_count }}</strong> ready
+            <span class="text-muted">(~{{ ready_stats.total_points }} pts)</span>
+        </span>
+        <span class="summary-item">
+            <strong>{{ stats.total_count }}</strong> filtered
+            <span class="text-muted">(~{{ stats.total_points }} pts)</span>
+        </span>
+    </div>
+</div>
+
+<!-- Filters and Controls -->
+<div class="card filters-card">
+    <div class="filters-row">
+        <div class="filter-group">
+            <label>Sort by</label>
+            <select id="sort-select" hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input" name="sort">
+                <option value="priority" {% if sort == "priority" %}selected{% endif %}>Priority</option>
+                <option value="size" {% if sort == "size" %}selected{% endif %}>Size (largest)</option>
+                <option value="age" {% if sort == "age" %}selected{% endif %}>Age (oldest)</option>
+                <option value="updated" {% if sort == "updated" %}selected{% endif %}>Recently updated</option>
+                <option value="number" {% if sort == "number" %}selected{% endif %}>Issue #</option>
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label>Epic</label>
+            <select class="filter-input" hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="epic">
+                <option value="">All epics</option>
+                {% for e in all_epics %}
+                <option value="{{ e }}" {% if epic_filter == e %}selected{% endif %}>{{ e }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label>Type</label>
+            <select class="filter-input" hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="type">
+                <option value="">All types</option>
+                {% for t in all_types %}
+                <option value="{{ t }}" {% if type_filter == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label>Size</label>
+            <select class="filter-input" hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="size">
+                <option value="">All sizes</option>
+                <option value="S" {% if size_filter == "S" %}selected{% endif %}>S (1 pt)</option>
+                <option value="M" {% if size_filter == "M" %}selected{% endif %}>M (3 pts)</option>
+                <option value="L" {% if size_filter == "L" %}selected{% endif %}>L (5 pts)</option>
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label class="checkbox-label">
+                <input type="checkbox" class="filter-input" name="ready_only" value="true"
+                       hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input, #sort-select"
+                       {% if ready_only %}checked{% endif %}>
+                Ready only
+            </label>
+        </div>
+    </div>
+
+    <div class="view-toggle">
+        <button class="view-btn {% if view == 'list' %}active{% endif %}"
+                hx-get="/backlog?view=list" hx-target="#backlog-content" hx-include=".filter-input, #sort-select">
+            List
+        </button>
+        <button class="view-btn {% if view == 'epic' %}active{% endif %}"
+                hx-get="/backlog?view=epic" hx-target="#backlog-content" hx-include=".filter-input, #sort-select">
+            By Epic
+        </button>
+        <span class="htmx-indicator"><span class="spinner"></span></span>
+    </div>
+</div>
+
+<!-- Size Summary -->
+<div class="size-summary">
+    {% for size_key, count in stats.size_counts.items() %}
+    {% if count > 0 %}
+    <span class="size-chip size-{{ size_key|lower }}">{{ size_key }}: {{ count }}</span>
+    {% endif %}
+    {% endfor %}
+</div>
+
+<!-- Main Content -->
+<div id="backlog-content">
+    {% include "partials/backlog_list.html" %}
+</div>
+
+<style>
+    .backlog-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .backlog-header h1 {
+        margin-bottom: 0;
+    }
+
+    .backlog-summary {
+        display: flex;
+        gap: 1.5rem;
+    }
+
+    .summary-item {
+        font-size: 0.9rem;
+    }
+
+    .text-muted {
+        color: var(--text-muted);
+    }
+
+    .filters-card {
+        margin-bottom: 1rem;
+    }
+
+    .filters-row {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: flex-end;
+    }
+
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .filter-group label {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+
+    .filter-group select {
+        min-width: 140px;
+    }
+
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        padding: 0.5rem 0;
+    }
+
+    .checkbox-label input {
+        width: auto;
+    }
+
+    .view-toggle {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--primary);
+        align-items: center;
+    }
+
+    .view-btn {
+        background: var(--primary);
+        border: none;
+        color: var(--text);
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    .view-btn.active {
+        background: var(--accent);
+    }
+
+    .size-summary {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .size-chip {
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 500;
+    }
+
+    .size-s { background: #22c55e; color: #000; }
+    .size-m { background: #eab308; color: #000; }
+    .size-l { background: #f97316; color: #000; }
+    .size-\? { background: var(--text-muted); color: #000; }
+
+    /* Epic grouping styles */
+    .epic-group {
+        margin-bottom: 1.5rem;
+    }
+
+    .epic-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem;
+        background: var(--primary);
+        border-radius: 4px 4px 0 0;
+        cursor: pointer;
+    }
+
+    .epic-header:hover {
+        background: var(--accent);
+    }
+
+    .epic-name {
+        font-weight: 600;
+        flex: 1;
+    }
+
+    .epic-stats {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+
+    .epic-issues {
+        background: var(--surface);
+        border-radius: 0 0 4px 4px;
+    }
+</style>
+{% endblock %}

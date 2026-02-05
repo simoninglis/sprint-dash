@@ -1,0 +1,21 @@
+# Build artifacts
+dist/
+build/
+target/
+*.pyc
+__pycache__/
+
+# Dependencies
+node_modules/
+venv/
+vendor/
+
+# Large files
+*.log
+*.sql
+*.db
+
+# Sensitive data
+.env
+.env.local
+secrets/

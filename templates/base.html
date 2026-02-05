@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Sprint Dashboard{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --surface: #16213e;
+            --primary: #0f3460;
+            --accent: #e94560;
+            --text: #eaeaea;
+            --text-muted: #a0a0a0;
+            --success: #4ade80;
+            --warning: #fbbf24;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        header {
+            background: var(--surface);
+            padding: 1rem;
+            border-bottom: 1px solid var(--primary);
+        }
+
+        nav {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        nav a {
+            color: var(--text);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        nav a:hover, nav a.active {
+            background: var(--primary);
+        }
+
+        .logo {
+            font-weight: bold;
+            font-size: 1.2rem;
+            color: var(--accent);
+            margin-right: auto;
+        }
+
+        main {
+            padding: 2rem 1rem;
+        }
+
+        h1, h2, h3 { margin-bottom: 1rem; }
+
+        .card {
+            background: var(--surface);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1rem;
+        }
+
+        .stat {
+            text-align: center;
+            padding: 1rem;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--primary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--success);
+            transition: width 0.3s;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .badge-open { background: var(--warning); color: #000; }
+        .badge-closed { background: var(--success); color: #000; }
+        .badge-bug { background: #ef4444; }
+        .badge-feature { background: #3b82f6; }
+        .badge-tech-debt { background: #8b5cf6; }
+        .badge-chore { background: #6b7280; }
+
+        .issue-list {
+            list-style: none;
+        }
+
+        .issue-item {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--primary);
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .issue-item:last-child {
+            border-bottom: none;
+        }
+
+        .issue-number {
+            color: var(--text-muted);
+            font-family: monospace;
+        }
+
+        .issue-title {
+            flex: 1;
+        }
+
+        input[type="search"], input[type="text"], select {
+            background: var(--primary);
+            border: 1px solid var(--surface);
+            color: var(--text);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-size: 1rem;
+            width: 100%;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .search-box {
+            margin-bottom: 1rem;
+        }
+
+        .filters {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            background: var(--primary);
+            border: none;
+            color: var(--text);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .filter-btn:hover, .filter-btn.active {
+            background: var(--accent);
+        }
+
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .htmx-request .htmx-indicator {
+            opacity: 1;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid var(--text-muted);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav class="container">
+            <span class="logo">Sprint Dashboard</span>
+            <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Home</a>
+            <a href="/sprints" {% if "/sprints" in request.url.path %}class="active"{% endif %}>Sprints</a>
+            <a href="/backlog" {% if request.url.path == "/backlog" %}class="active"{% endif %}>Backlog</a>
+            <a href="/search" {% if request.url.path == "/search" %}class="active"{% endif %}>Search</a>
+        </nav>
+    </header>
+
+    <main class="container">
+        <div id="content">
+        {% block content %}{% endblock %}
+        </div>
+    </main>
+</body>
+</html>

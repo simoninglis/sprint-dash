@@ -1,0 +1,12 @@
+<ul class="issue-list">
+    {% for issue in issues %}
+    <li class="issue-item">
+        <span class="issue-number">#{{ issue.number }}</span>
+        <a href="/issues/{{ issue.number }}" class="issue-title" hx-get="/issues/{{ issue.number }}" hx-target="#content" hx-push-url="true">{{ issue.title }}</a>
+        <span class="badge badge-{{ issue.state }}">{{ issue.state }}</span>
+        <span class="badge badge-{{ issue.issue_type }}">{{ issue.issue_type }}</span>
+    </li>
+    {% else %}
+    <li class="empty-state">No issues found</li>
+    {% endfor %}
+</ul>

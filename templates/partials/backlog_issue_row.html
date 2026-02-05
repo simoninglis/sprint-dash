@@ -1,0 +1,112 @@
+<ul class="issue-list backlog-list">
+    {% for issue in issues %}
+    <li class="issue-item backlog-item">
+        <!-- Priority -->
+        <span class="issue-priority {% if issue.priority %}p{{ issue.priority }}{% else %}p-none{% endif %}">
+            {% if issue.priority %}P{{ issue.priority }}{% else %}--{% endif %}
+        </span>
+
+        <!-- Issue number -->
+        <span class="issue-number">#{{ issue.number }}</span>
+
+        <!-- Size -->
+        <span class="issue-size {% if issue.size %}size-{{ issue.size|lower }}{% else %}size-none{% endif %}">
+            {{ issue.size or "?" }}
+        </span>
+
+        <!-- Title (clickable) -->
+        <a href="/issues/{{ issue.number }}" class="issue-title"
+           hx-get="/issues/{{ issue.number }}" hx-target="#content" hx-push-url="true">
+            {{ issue.title }}
+        </a>
+
+        <!-- Type badge -->
+        <span class="badge badge-{{ issue.issue_type }}">{{ issue.issue_type }}</span>
+
+        <!-- Ready indicator -->
+        {% if issue.is_ready %}
+        <span class="badge badge-ready">ready</span>
+        {% endif %}
+
+        <!-- Epic (if not in epic view) -->
+        {% if issue.epic and view != "epic" %}
+        <span class="badge badge-epic">{{ issue.epic }}</span>
+        {% endif %}
+    </li>
+    {% else %}
+    <li class="empty-state">No issues found</li>
+    {% endfor %}
+</ul>
+
+<style>
+    .backlog-list .backlog-item {
+        display: grid;
+        grid-template-columns: 30px 60px 30px 1fr auto auto auto;
+        gap: 0.75rem;
+        align-items: center;
+    }
+
+    .issue-priority {
+        font-weight: 700;
+        font-size: 0.8rem;
+        text-align: center;
+    }
+
+    .issue-priority.p1 { color: #ef4444; }
+    .issue-priority.p2 { color: #f97316; }
+    .issue-priority.p3 { color: #eab308; }
+    .issue-priority.p-none { color: var(--text-muted); }
+
+    .issue-size {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    .issue-size.size-s { background: #22c55e; color: #000; }
+    .issue-size.size-m { background: #eab308; color: #000; }
+    .issue-size.size-l { background: #f97316; color: #000; }
+    .issue-size.size-xl { background: #ef4444; color: #fff; }
+    .issue-size.size-none { background: var(--primary); color: var(--text-muted); }
+
+    .badge-ready {
+        background: var(--success);
+        color: #000;
+    }
+
+    .badge-epic {
+        background: var(--primary);
+        border: 1px solid var(--accent);
+        font-size: 0.7rem;
+    }
+
+    .backlog-list .issue-title {
+        color: var(--text);
+        text-decoration: none;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .backlog-list .issue-title:hover {
+        color: var(--accent);
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+        .backlog-list .backlog-item {
+            grid-template-columns: 30px 50px 24px 1fr;
+            grid-template-rows: auto auto;
+        }
+
+        .backlog-list .badge {
+            grid-column: 4;
+            justify-self: start;
+        }
+    }
+</style>

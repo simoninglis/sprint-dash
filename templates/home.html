@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="grid">
+    {% if current_sprint %}
+    <div class="card">
+        <div class="card-header">
+            <h2>Sprint {{ current_sprint.number }}</h2>
+            <span class="badge badge-open">Current</span>
+        </div>
+        <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="stat">
+                <div class="stat-value">{{ current_sprint.open_count }}</div>
+                <div class="stat-label">Open</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ current_sprint.closed_count }}</div>
+                <div class="stat-label">Closed</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ current_sprint.progress_pct }}%</div>
+                <div class="stat-label">Progress</div>
+            </div>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ current_sprint.progress_pct }}%"></div>
+        </div>
+        <a href="/sprints/{{ current_sprint.number }}" style="color: var(--accent);">View details →</a>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Ready Queue</h2>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ ready_count }}</div>
+            <div class="stat-label">Issues ready for sprint</div>
+        </div>
+        <a href="/backlog" style="color: var(--accent);">View backlog →</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Recent Sprints</h2>
+    </div>
+    <ul class="issue-list">
+        {% for sprint in sprints %}
+        <li class="issue-item">
+            <span class="issue-number">Sprint {{ sprint.number }}</span>
+            <span class="issue-title">{{ sprint.total }} issues</span>
+            <div class="progress-bar" style="width: 100px;">
+                <div class="progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
+            </div>
+            <span>{{ sprint.progress_pct }}%</span>
+            <a href="/sprints/{{ sprint.number }}" style="color: var(--accent);">View</a>
+        </li>
+        {% else %}
+        <li class="empty-state">No sprints found</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endblock %}

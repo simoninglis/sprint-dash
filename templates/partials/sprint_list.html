@@ -1,0 +1,25 @@
+<ul class="issue-list">
+    {% for sprint in sprints %}
+    <li class="issue-item">
+        <span class="issue-number" style="font-size: 1.2rem; font-weight: bold;">
+            Sprint {{ sprint.number }}
+        </span>
+        <span class="issue-title">
+            {{ sprint.open_count }} open / {{ sprint.closed_count }} closed
+        </span>
+        <div class="progress-bar" style="width: 150px;">
+            <div class="progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
+        </div>
+        <span style="min-width: 50px; text-align: right;">{{ sprint.progress_pct }}%</span>
+        <a href="/sprints/{{ sprint.number }}"
+           hx-get="/sprints/{{ sprint.number }}"
+           hx-target="#content"
+           hx-push-url="true"
+           hx-indicator="closest .issue-item"
+           style="color: var(--accent);">View →</a>
+        <span class="htmx-indicator"><div class="spinner"></div></span>
+    </li>
+    {% else %}
+    <li class="empty-state">No sprints found</li>
+    {% endfor %}
+</ul>

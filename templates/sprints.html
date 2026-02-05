@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Sprints - Sprint Dashboard{% endblock %}
+
+{% block content %}
+<h1>All Sprints</h1>
+
+<div class="card">
+    {% include "partials/sprint_list.html" %}
+</div>
+{% endblock %}
