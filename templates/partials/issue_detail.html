@@ -37,7 +37,7 @@
                 <span class="dep-status">
                     {% if dep.is_closed %}&#x2714;{% else %}&#x23F3;{% endif %}
                 </span>
-                <a href="/issues/{{ dep.number }}" class="dep-link">
+                <a href="{{ repo_url('/issues/' ~ dep.number) }}" class="dep-link">
                     #{{ dep.number }}
                 </a>
                 <span class="dep-title">{{ dep.title }}</span>
@@ -65,7 +65,7 @@
         <ul class="dep-list">
             {% for dep in blocks %}
             <li class="dep-item">
-                <a href="/issues/{{ dep.number }}" class="dep-link">
+                <a href="{{ repo_url('/issues/' ~ dep.number) }}" class="dep-link">
                     #{{ dep.number }}
                 </a>
                 <span class="dep-title">{{ dep.title }}</span>

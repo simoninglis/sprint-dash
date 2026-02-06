@@ -9,7 +9,7 @@
         <h1>Sprint Board</h1>
         <div class="board-filters">
             <select class="board-filter" name="type_filter"
-                    hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
+                    hx-get="{{ repo_url('/board') }}" hx-target="#board-content" hx-include=".board-filter">
                 <option value="">All types</option>
                 {% for t in all_types %}
                 <option value="{{ t }}" {% if type_filter == t %}selected{% endif %}>{{ t }}</option>
@@ -17,7 +17,7 @@
             </select>
 
             <select class="board-filter" name="epic_filter"
-                    hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
+                    hx-get="{{ repo_url('/board') }}" hx-target="#board-content" hx-include=".board-filter">
                 <option value="">All epics</option>
                 {% for e in all_epics %}
                 <option value="{{ e }}" {% if epic_filter == e %}selected{% endif %}>{{ e }}</option>
@@ -26,27 +26,26 @@
 
             <label class="board-checkbox">
                 <input type="checkbox" class="board-filter" name="show_closed" value="true"
-                       hx-get="/board" hx-target="#board-content" hx-include=".board-filter"
+                       hx-get="{{ repo_url('/board') }}" hx-target="#board-content" hx-include=".board-filter"
                        {% if show_closed %}checked{% endif %}>
                 Show closed
             </label>
 
             <label class="board-checkbox">
                 <input type="checkbox" class="board-filter" name="group_by_epic" value="true"
-                       hx-get="/board" hx-target="#board-content" hx-include=".board-filter"
+                       hx-get="{{ repo_url('/board') }}" hx-target="#board-content" hx-include=".board-filter"
                        {% if group_by_epic %}checked{% endif %}>
                 Group by epic
             </label>
 
-            <!-- Hidden center param to preserve navigation when filtering -->
-            <input type="hidden" class="board-filter" name="center" value="{{ center_sprint_num }}">
+            <!-- Hidden center param is in board_content.html to stay in sync with navigation -->
 
             <span class="auto-refresh-indicator" title="Auto-refreshes every 30s">
                 <span class="pulse-dot"></span>
                 Auto
             </span>
 
-            <button class="refresh-btn" hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
+            <button class="refresh-btn" hx-get="{{ repo_url('/board') }}" hx-target="#board-content" hx-include=".board-filter">
                 Refresh
                 <span class="htmx-indicator"><span class="spinner"></span></span>
             </button>
@@ -55,7 +54,7 @@
 
     <!-- Board columns (auto-refresh every 30s) -->
     <div id="board-content"
-         hx-get="/board"
+         hx-get="{{ repo_url('/board') }}"
          hx-trigger="every 30s"
          hx-include=".board-filter"
          hx-swap="innerHTML">

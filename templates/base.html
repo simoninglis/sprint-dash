@@ -61,6 +61,23 @@
             font-size: 1.2rem;
             color: var(--accent);
             margin-right: auto;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .repo-badge {
+            font-size: 0.75rem;
+            font-weight: normal;
+            background: var(--primary);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            color: var(--text-muted);
+        }
+
+        .switch-repo {
+            font-size: 1.2rem;
+            padding: 0.25rem 0.5rem !important;
         }
 
         main {
@@ -260,12 +277,20 @@
 <body>
     <header>
         <nav class="container">
-            <span class="logo">Sprint Dashboard</span>
-            <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Home</a>
-            <a href="/board" {% if request.url.path == "/board" %}class="active"{% endif %}>Board</a>
-            <a href="/sprints" {% if "/sprints" in request.url.path %}class="active"{% endif %}>Sprints</a>
-            <a href="/backlog" {% if request.url.path == "/backlog" %}class="active"{% endif %}>Backlog</a>
-            <a href="/search" {% if request.url.path == "/search" %}class="active"{% endif %}>Search</a>
+            <span class="logo">
+                <a href="/" style="color: inherit; text-decoration: none;">Sprint Dashboard</a>
+                {% if owner and repo %}
+                <span class="repo-badge">{{ owner }}/{{ repo }}</span>
+                {% endif %}
+            </span>
+            {% if owner and repo %}
+            <a href="{{ repo_url('') }}" {% if request.url.path == repo_url('') %}class="active"{% endif %}>Home</a>
+            <a href="{{ repo_url('/board') }}" {% if '/board' in request.url.path %}class="active"{% endif %}>Board</a>
+            <a href="{{ repo_url('/sprints') }}" {% if '/sprints' in request.url.path %}class="active"{% endif %}>Sprints</a>
+            <a href="{{ repo_url('/backlog') }}" {% if '/backlog' in request.url.path %}class="active"{% endif %}>Backlog</a>
+            <a href="{{ repo_url('/search') }}" {% if '/search' in request.url.path %}class="active"{% endif %}>Search</a>
+            <a href="/?picker=1" class="switch-repo" title="Switch repository">&#x21C4;</a>
+            {% endif %}
         </nav>
     </header>
 

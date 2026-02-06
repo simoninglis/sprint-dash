@@ -1,8 +1,14 @@
+<!-- Hidden center param stays in sync with navigation -->
+{% if center_sprint_num %}
+<input type="hidden" class="board-filter" name="center" value="{{ center_sprint_num }}">
+{% endif %}
+
 <!-- Navigation Header -->
+{% if center_sprint_num %}
 <div class="board-nav">
     <button class="nav-btn {% if not can_go_back %}disabled{% endif %}"
             {% if can_go_back %}
-            hx-get="/board?center={{ center_sprint_num - 1 }}&show_closed={{ show_closed }}&type_filter={{ type_filter }}&epic_filter={{ epic_filter }}&group_by_epic={{ group_by_epic }}"
+            hx-get="{{ repo_url('/board') }}?center={{ center_sprint_num - 1 }}&show_closed={{ show_closed }}&type_filter={{ type_filter|urlencode }}&epic_filter={{ epic_filter|urlencode }}&group_by_epic={{ group_by_epic }}"
             hx-target="#board-content"
             hx-push-url="true"
             {% endif %}
@@ -13,8 +19,8 @@
         Viewing sprints around
         <strong>Sprint {{ center_sprint_num }}</strong>
         {% if center_sprint_num != current_sprint_num %}
-        <a href="/board?show_closed={{ show_closed }}&type_filter={{ type_filter }}&epic_filter={{ epic_filter }}&group_by_epic={{ group_by_epic }}"
-           hx-get="/board?show_closed={{ show_closed }}&type_filter={{ type_filter }}&epic_filter={{ epic_filter }}&group_by_epic={{ group_by_epic }}"
+        <a href="{{ repo_url('/board') }}?show_closed={{ show_closed }}&type_filter={{ type_filter|urlencode }}&epic_filter={{ epic_filter|urlencode }}&group_by_epic={{ group_by_epic }}"
+           hx-get="{{ repo_url('/board') }}?show_closed={{ show_closed }}&type_filter={{ type_filter|urlencode }}&epic_filter={{ epic_filter|urlencode }}&group_by_epic={{ group_by_epic }}"
            hx-target="#board-content"
            hx-push-url="true"
            style="color: var(--accent); margin-left: 0.5rem;">
@@ -24,7 +30,7 @@
     </span>
     <button class="nav-btn {% if not can_go_forward %}disabled{% endif %}"
             {% if can_go_forward %}
-            hx-get="/board?center={{ center_sprint_num + 1 }}&show_closed={{ show_closed }}&type_filter={{ type_filter }}&epic_filter={{ epic_filter }}&group_by_epic={{ group_by_epic }}"
+            hx-get="{{ repo_url('/board') }}?center={{ center_sprint_num + 1 }}&show_closed={{ show_closed }}&type_filter={{ type_filter|urlencode }}&epic_filter={{ epic_filter|urlencode }}&group_by_epic={{ group_by_epic }}"
             hx-target="#board-content"
             hx-push-url="true"
             {% endif %}
@@ -32,6 +38,11 @@
         Later →
     </button>
 </div>
+{% else %}
+<div class="board-nav">
+    <span class="nav-info">No sprints found in this repository</span>
+</div>
+{% endif %}
 
 <div class="board-grid" style="grid-template-columns: repeat({{ columns }}, 1fr);">
     <!-- Backlog Column (Ready Queue) -->
@@ -175,6 +186,7 @@
     {% endfor %}
 
     <!-- Empty columns if needed (for future sprints not yet created) -->
+    {% if center_sprint_num %}
     {% set shown_columns = 1 + sprint_columns|length %}
     {% for i in range(columns - shown_columns) %}
     {% set empty_sprint_num = center_sprint_num + 2 - (columns - shown_columns - 1 - i) %}
@@ -194,6 +206,7 @@
         </div>
     </div>
     {% endfor %}
+    {% endif %}
 </div>
 
 <style>

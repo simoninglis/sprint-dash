@@ -14,8 +14,8 @@
             <div class="progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
         </div>
         <span style="min-width: 50px; text-align: right;">{{ sprint.progress_pct }}%</span>
-        <a href="/sprints/{{ sprint.number }}"
-           hx-get="/sprints/{{ sprint.number }}"
+        <a href="{{ repo_url('/sprints/' ~ sprint.number) }}"
+           hx-get="{{ repo_url('/sprints/' ~ sprint.number) }}"
            hx-target="#content"
            hx-push-url="true"
            hx-indicator="closest .issue-item"

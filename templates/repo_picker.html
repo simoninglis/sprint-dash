@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Select Repository - Sprint Dashboard{% endblock %}
+
+{% block content %}
+<div class="repo-picker">
+    <h1>Select Repository</h1>
+    <p class="picker-subtitle">Choose a repository to view its sprint dashboard</p>
+
+    {% for owner_name, repos in repos_by_owner.items() %}
+    <div class="owner-group">
+        <h2 class="owner-name">{{ owner_name }}</h2>
+        <ul class="repo-list">
+            {% for r in repos %}
+            <li class="repo-item">
+                <a href="/{{ r.owner }}/{{ r.name }}" class="repo-link"
+                   onclick="localStorage.setItem('lastRepo', '{{ r.full_name }}');">
+                    <strong class="repo-name">{{ r.name }}</strong>
+                    {% if r.description %}
+                    <span class="repo-desc">{{ r.description }}</span>
+                    {% endif %}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No repositories found.</p>
+        <p class="text-muted">Make sure your Gitea token has access to repositories.</p>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+// Auto-redirect to last used repo
+const lastRepo = localStorage.getItem('lastRepo');
+if (lastRepo && !window.location.search.includes('picker=1')) {
+    const [owner, repo] = lastRepo.split('/');
+    if (owner && repo) {
+        window.location.href = `/${owner}/${repo}`;
+    }
+}
+</script>
+
+<style>
+    .repo-picker {
+        max-width: 800px;
+        margin: 0 auto;
+    }
+
+    .repo-picker h1 {
+        margin-bottom: 0.5rem;
+    }
+
+    .picker-subtitle {
+        color: var(--text-muted);
+        margin-bottom: 2rem;
+    }
+
+    .owner-group {
+        margin-bottom: 2rem;
+    }
+
+    .owner-name {
+        font-size: 1rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--primary);
+    }
+
+    .repo-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .repo-item {
+        margin-bottom: 0.5rem;
+    }
+
+    .repo-link {
+        display: block;
+        padding: 1rem;
+        background: var(--surface);
+        border-radius: 8px;
+        text-decoration: none;
+        color: var(--text);
+        transition: transform 0.1s, box-shadow 0.1s, background 0.2s;
+        border-left: 3px solid transparent;
+    }
+
+    .repo-link:hover {
+        transform: translateX(4px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        background: var(--primary);
+        border-left-color: var(--accent);
+    }
+
+    .repo-name {
+        display: block;
+        font-size: 1.1rem;
+        margin-bottom: 0.25rem;
+        color: var(--accent);
+    }
+
+    .repo-desc {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .text-muted {
+        color: var(--text-muted);
+    }
+</style>
+{% endblock %}

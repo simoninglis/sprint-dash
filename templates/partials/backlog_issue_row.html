@@ -15,8 +15,8 @@
         </span>
 
         <!-- Title (clickable) -->
-        <a href="/issues/{{ issue.number }}" class="issue-title"
-           hx-get="/issues/{{ issue.number }}" hx-target="#content" hx-push-url="true">
+        <a href="{{ repo_url('/issues/' ~ issue.number) }}" class="issue-title"
+           hx-get="{{ repo_url('/issues/' ~ issue.number) }}" hx-target="#content" hx-push-url="true">
             {{ issue.title }}
         </a>
 

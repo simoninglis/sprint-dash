@@ -6,7 +6,6 @@ import re
 import warnings
 from dataclasses import dataclass
 from datetime import date
-from functools import lru_cache
 from pathlib import Path
 
 import httpx
@@ -49,9 +48,9 @@ PIPELINE_WORKFLOWS: tuple[str, ...] = (
 )
 
 # Cache for dependency counts (repo:issue_number -> (blocked_by_count, blocks_count, blockers_list))
-_deps_cache: TTLCache[str, tuple[int, int, list[tuple[int, str, int | None]]]] = TTLCache(
-    maxsize=500, ttl=60
-)
+_deps_cache: TTLCache[
+    str, tuple[int, int, list[tuple[int, str, int | None]]]
+] = TTLCache(maxsize=500, ttl=60)
 
 # Cache for epic -> color mapping (built per board load)
 _epic_colors: dict[str, str] = {}
@@ -64,6 +63,9 @@ _ci_health_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=60)
 
 # Separate short-lived cache for CI health failures (5s TTL) to avoid hammering API
 _ci_health_failure_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=5)
+
+# User repos cache (5 minute TTL - repos don't change often)
+_user_repos_cache: TTLCache[str, list[dict[str, str]]] = TTLCache(maxsize=1, ttl=300)
 
 
 def get_epic_color(epic_name: str | None) -> str:
@@ -615,6 +617,7 @@ class GiteaClient:
         owner: str | None = None,
         repo: str | None = None,
         tea_login: str | None = None,
+        skip_repo_env: bool = False,
     ):
         """Initialize the Gitea client.
 
@@ -624,6 +627,7 @@ class GiteaClient:
             owner: Repository owner (optional, from env if not provided)
             repo: Repository name (optional, from env if not provided)
             tea_login: Specific tea login name to use (optional)
+            skip_repo_env: If True, don't fall back to env for owner/repo (for base client)
         """
         # Try tea config as fallback for URL and token
         tea = _get_tea_login(tea_login)
@@ -634,8 +638,12 @@ class GiteaClient:
         self.token = (
             token or os.getenv("GITEA_TOKEN") or (tea.get("token") if tea else None)
         )
-        self.owner = owner or os.getenv("GITEA_OWNER", "")
-        self.repo = repo or os.getenv("GITEA_REPO", "")
+        if skip_repo_env:
+            self.owner = owner if owner is not None else ""
+            self.repo = repo if repo is not None else ""
+        else:
+            self.owner = owner if owner is not None else os.getenv("GITEA_OWNER", "") or ""
+            self.repo = repo if repo is not None else os.getenv("GITEA_REPO", "") or ""
 
         if not self.base_url:
             raise ConfigError(
@@ -1089,11 +1097,9 @@ class GiteaClient:
                         continue
 
                     # Keep latest run per workflow (highest run_number)
-                    if (
-                        workflow_file not in workflow_runs
-                        or run.get("run_number", 0)
-                        > workflow_runs[workflow_file].get("run_number", 0)
-                    ):
+                    if workflow_file not in workflow_runs or run.get(
+                        "run_number", 0
+                    ) > workflow_runs[workflow_file].get("run_number", 0):
                         workflow_runs[workflow_file] = run
 
             # Build workflow status map
@@ -1117,6 +1123,60 @@ class GiteaClient:
             result = CIHealth(sha="?", state="unknown", workflows=())
             _ci_health_failure_cache[cache_key] = result
             return result
+
+    def get_user_repos(self) -> list[dict[str, str]]:
+        """Fetch repositories accessible to the authenticated user.
+
+        Paginates through all available repos (up to MAX_PAGES).
+
+        Returns:
+            List of repo dicts with owner, name, full_name, description keys.
+            Returns empty list on error.
+        """
+        cache_key = f"{self.base_url}:user_repos"
+        if cache_key in _user_repos_cache:
+            return _user_repos_cache[cache_key]
+
+        try:
+            repos: list[dict[str, str]] = []
+            page = 1
+
+            while page <= MAX_PAGES:
+                resp = self._client.get(
+                    "/user/repos", params={"limit": PAGE_LIMIT, "page": page}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                if not data:
+                    break
+
+                for r in data:
+                    repos.append(
+                        {
+                            "owner": r.get("owner", {}).get("login", ""),
+                            "name": r.get("name", ""),
+                            "full_name": r.get("full_name", ""),
+                            "description": r.get("description", "") or "",
+                        }
+                    )
+
+                if len(data) < PAGE_LIMIT:
+                    break
+                page += 1
+            else:
+                # Hit MAX_PAGES limit
+                logger.warning(
+                    f"User repos list truncated at {MAX_PAGES} pages "
+                    f"({len(repos)} repos). Some repos may not be shown."
+                )
+
+            repos = sorted(repos, key=lambda x: x["full_name"].lower())
+            _user_repos_cache[cache_key] = repos
+            return repos
+        except (httpx.HTTPStatusError, httpx.RequestError) as e:
+            logger.warning(f"Failed to fetch user repos: {e}")
+            return []
 
     def get_board_data(self, num_future_sprints: int = 2) -> BoardData:
         """Get all data needed for board view in a single fetch.
@@ -1179,7 +1239,62 @@ class GiteaClient:
         )
 
 
-@lru_cache
-def get_client() -> GiteaClient:
-    """Get cached Gitea client instance."""
-    return GiteaClient()
+# Client cache for proper lifecycle management
+# Key: (base_url, owner, repo) to support multi-instance scenarios
+_client_cache: dict[tuple[str | None, str | None, str | None], GiteaClient] = {}
+
+
+def _get_base_url() -> str | None:
+    """Get the base URL for cache key purposes (from env or tea config)."""
+    url = os.getenv("GITEA_URL")
+    if url:
+        return url
+    tea = _get_tea_login()
+    return tea.get("url") if tea else None
+
+
+def get_client(owner: str | None = None, repo: str | None = None) -> GiteaClient:
+    """Get cached Gitea client, optionally for a specific repo.
+
+    Args:
+        owner: Repository owner. If None, uses env/tea config.
+        repo: Repository name. If None, uses env/tea config.
+
+    Returns:
+        Cached GiteaClient instance for the given owner/repo.
+    """
+    # Include base_url in cache key to support multiple Gitea instances
+    base_url = _get_base_url()
+    key = (base_url, owner, repo)
+    if key not in _client_cache:
+        _client_cache[key] = GiteaClient(owner=owner, repo=repo)
+    return _client_cache[key]
+
+
+def close_all_clients() -> None:
+    """Close all cached Gitea clients and clear the cache."""
+    global _base_client
+    for client in _client_cache.values():
+        client.close()
+    _client_cache.clear()
+    # Also close the base client
+    if _base_client is not None:
+        _base_client.close()
+        _base_client = None
+
+
+# Singleton base client for repo discovery
+_base_client: GiteaClient | None = None
+
+
+def get_base_client() -> GiteaClient:
+    """Get client without repo context (for repo discovery).
+
+    This client can be used to list repos but not for repo-specific operations.
+    Uses explicit None to prevent environment variable fallback.
+    """
+    global _base_client
+    if _base_client is None:
+        # Pass explicit marker to skip env fallback
+        _base_client = GiteaClient(owner=None, repo=None, skip_repo_env=True)
+    return _base_client

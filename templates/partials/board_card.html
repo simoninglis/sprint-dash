@@ -1,7 +1,7 @@
 {# Board card - expects 'issue' to be a BoardIssue #}
 <div class="board-card card-{{ issue.state }} {% if issue.is_blocked %}card-blocked{% elif issue.needs_polish and issue.state == 'open' %}card-polish{% endif %}"
      style="--epic-color: {{ issue.epic_color }};"
-     hx-get="/issues/{{ issue.number }}"
+     hx-get="{{ repo_url('/issues/' ~ issue.number) }}"
      hx-target="#content"
      hx-push-url="true">
 
@@ -46,7 +46,7 @@
         {% endif %}
         {% if issue.epic %}
         <span class="mini-badge epic" title="{{ issue.epic }}"
-              hx-get="/board?epic_filter={{ issue.epic }}"
+              hx-get="{{ repo_url('/board') }}?epic_filter={{ issue.epic|urlencode }}"
               hx-target="#board-content"
               hx-include=".board-filter"
               onclick="event.stopPropagation();">

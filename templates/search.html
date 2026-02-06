@@ -11,7 +11,7 @@
                name="q"
                value="{{ query }}"
                placeholder="Search issues by title..."
-               hx-get="/issues"
+               hx-get="{{ repo_url('/issues') }}"
                hx-trigger="keyup changed delay:300ms, search"
                hx-target="#results"
                hx-include="[name='label'], [name='state']"
@@ -24,28 +24,28 @@
     <div class="filters">
         <span style="color: var(--text-muted); margin-right: 0.5rem;">Filter:</span>
         <button class="filter-btn"
-                hx-get="/issues?label="
+                hx-get="{{ repo_url('/issues') }}?label="
                 hx-target="#results"
                 hx-include="[name='q'], [name='state']"
                 hx-indicator="#filter-spinner">All</button>
         <button class="filter-btn"
-                hx-get="/issues?label=bug"
+                hx-get="{{ repo_url('/issues') }}?label=bug"
                 hx-target="#results"
                 hx-include="[name='q'], [name='state']"
                 hx-indicator="#filter-spinner">Bugs</button>
         <button class="filter-btn"
-                hx-get="/issues?label=feature"
+                hx-get="{{ repo_url('/issues') }}?label=feature"
                 hx-target="#results"
                 hx-include="[name='q'], [name='state']"
                 hx-indicator="#filter-spinner">Features</button>
         <button class="filter-btn"
-                hx-get="/issues?label=tech-debt"
+                hx-get="{{ repo_url('/issues') }}?label=tech-debt"
                 hx-target="#results"
                 hx-include="[name='q'], [name='state']"
                 hx-indicator="#filter-spinner">Tech Debt</button>
 
         <select name="state"
-                hx-get="/issues"
+                hx-get="{{ repo_url('/issues') }}"
                 hx-target="#results"
                 hx-include="[name='q'], [name='label']"
                 hx-indicator="#filter-spinner"

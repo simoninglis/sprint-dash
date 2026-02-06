@@ -27,7 +27,7 @@
         <div class="progress-bar">
             <div class="progress-fill" style="width: {{ current_sprint.progress_pct }}%"></div>
         </div>
-        <a href="/sprints/{{ current_sprint.number }}" style="color: var(--accent);">View details →</a>
+        <a href="{{ repo_url('/sprints/' ~ current_sprint.number) }}" style="color: var(--accent);">View details →</a>
     </div>
     {% endif %}
 
@@ -39,7 +39,7 @@
             <div class="stat-value">{{ ready_count }}</div>
             <div class="stat-label">Issues ready for sprint</div>
         </div>
-        <a href="/backlog" style="color: var(--accent);">View backlog →</a>
+        <a href="{{ repo_url('/backlog') }}" style="color: var(--accent);">View backlog →</a>
     </div>
 </div>
 
@@ -56,7 +56,7 @@
                 <div class="progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
             </div>
             <span>{{ sprint.progress_pct }}%</span>
-            <a href="/sprints/{{ sprint.number }}" style="color: var(--accent);">View</a>
+            <a href="{{ repo_url('/sprints/' ~ sprint.number) }}" style="color: var(--accent);">View</a>
         </li>
         {% else %}
         <li class="empty-state">No sprints found</li>

@@ -22,7 +22,7 @@
     <div class="filters-row">
         <div class="filter-group">
             <label>Sort by</label>
-            <select id="sort-select" hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input" name="sort">
+            <select id="sort-select" hx-get="{{ repo_url('/backlog') }}" hx-target="#backlog-content" hx-include=".filter-input" name="sort">
                 <option value="priority" {% if sort == "priority" %}selected{% endif %}>Priority</option>
                 <option value="size" {% if sort == "size" %}selected{% endif %}>Size (largest)</option>
                 <option value="age" {% if sort == "age" %}selected{% endif %}>Age (oldest)</option>
@@ -33,7 +33,7 @@
 
         <div class="filter-group">
             <label>Epic</label>
-            <select class="filter-input" hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="epic">
+            <select class="filter-input" hx-get="{{ repo_url('/backlog') }}" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="epic">
                 <option value="">All epics</option>
                 {% for e in all_epics %}
                 <option value="{{ e }}" {% if epic_filter == e %}selected{% endif %}>{{ e }}</option>
@@ -43,7 +43,7 @@
 
         <div class="filter-group">
             <label>Type</label>
-            <select class="filter-input" hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="type">
+            <select class="filter-input" hx-get="{{ repo_url('/backlog') }}" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="type">
                 <option value="">All types</option>
                 {% for t in all_types %}
                 <option value="{{ t }}" {% if type_filter == t %}selected{% endif %}>{{ t }}</option>
@@ -53,7 +53,7 @@
 
         <div class="filter-group">
             <label>Size</label>
-            <select class="filter-input" hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="size">
+            <select class="filter-input" hx-get="{{ repo_url('/backlog') }}" hx-target="#backlog-content" hx-include=".filter-input, #sort-select" name="size">
                 <option value="">All sizes</option>
                 <option value="S" {% if size_filter == "S" %}selected{% endif %}>S (1 pt)</option>
                 <option value="M" {% if size_filter == "M" %}selected{% endif %}>M (3 pts)</option>
@@ -64,7 +64,7 @@
         <div class="filter-group">
             <label class="checkbox-label">
                 <input type="checkbox" class="filter-input" name="ready_only" value="true"
-                       hx-get="/backlog" hx-target="#backlog-content" hx-include=".filter-input, #sort-select"
+                       hx-get="{{ repo_url('/backlog') }}" hx-target="#backlog-content" hx-include=".filter-input, #sort-select"
                        {% if ready_only %}checked{% endif %}>
                 Ready only
             </label>
@@ -73,11 +73,11 @@
 
     <div class="view-toggle">
         <button class="view-btn {% if view == 'list' %}active{% endif %}"
-                hx-get="/backlog?view=list" hx-target="#backlog-content" hx-include=".filter-input, #sort-select">
+                hx-get="{{ repo_url('/backlog') }}?view=list" hx-target="#backlog-content" hx-include=".filter-input, #sort-select">
             List
         </button>
         <button class="view-btn {% if view == 'epic' %}active{% endif %}"
-                hx-get="/backlog?view=epic" hx-target="#backlog-content" hx-include=".filter-input, #sort-select">
+                hx-get="{{ repo_url('/backlog') }}?view=epic" hx-target="#backlog-content" hx-include=".filter-input, #sort-select">
             By Epic
         </button>
         <span class="htmx-indicator"><span class="spinner"></span></span>
