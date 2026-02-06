@@ -491,12 +491,27 @@ class CIHealth:
             return cls(sha=sha, state="unknown", workflows=())
 
         # Derive state from workflow statuses
+        # Terminal states: success, failure, cancelled, skipped, neutral
+        # "not_run" = placeholder for workflows that haven't run yet (ignore in aggregate)
         statuses = [status for status, _url in workflows.values()]
-        if any(s == "failure" for s in statuses):
+        real_statuses = [s for s in statuses if s != "not_run"]
+
+        if not real_statuses:
+            # No workflows have run yet
+            state = "pending"
+        elif any(s == "failure" for s in real_statuses):
             state = "failure"
-        elif any(s in ("running", "waiting") for s in statuses):
+        elif any(s in ("running", "waiting", "queued", "pending") for s in real_statuses):
             state = "running"
-        elif all(s == "success" for s in statuses):
+        elif any(s == "cancelled" for s in real_statuses):
+            state = "cancelled"
+        elif all(s == "success" for s in real_statuses):
+            state = "success"
+        elif all(s in ("skipped", "neutral") for s in real_statuses):
+            # All ran workflows skipped/neutral - no meaningful run
+            state = "skipped"
+        elif all(s in ("success", "skipped", "neutral") for s in real_statuses):
+            # Mix of success and skipped/neutral - treat as success
             state = "success"
         else:
             state = "pending"
@@ -524,6 +539,12 @@ class CIHealth:
             "failure": "✗",
             "running": "⏳",
             "waiting": "⏳",
+            "queued": "⏳",
+            "pending": "⏳",
+            "cancelled": "⊘",
+            "skipped": "–",  # Distinct from cancelled
+            "neutral": "○",
+            "not_run": "·",  # Placeholder for workflows that haven't run
         }
         return [
             (abbrev_map.get(wf, wf[:1].upper()), status, icon_map.get(status, "?"), url)
@@ -1096,9 +1117,13 @@ class GiteaClient:
             workflow_runs: dict[str, dict] = {}
             for run in runs:
                 if run.get("head_sha", "") == full_sha:
-                    # Extract workflow file from path (e.g., "ci.yml@refs/heads/main")
+                    # Extract workflow file from path (e.g., "ci.yml@refs/heads/main"
+                    # or ".gitea/workflows/ci.yml@refs/heads/main")
                     path = run.get("path", "")
                     workflow_file = path.split("@")[0] if "@" in path else path
+                    # Extract just the filename (basename) to match PIPELINE_WORKFLOWS
+                    if "/" in workflow_file:
+                        workflow_file = workflow_file.rsplit("/", 1)[-1]
 
                     # Only track pipeline workflows
                     if workflow_file not in PIPELINE_WORKFLOWS:
@@ -1111,6 +1136,7 @@ class GiteaClient:
                         workflow_runs[workflow_file] = run
 
             # Build workflow status map with URLs
+            # Include ALL expected workflows - missing ones shown as "pending"
             workflows: dict[str, tuple[str, str]] = {}
             for wf in PIPELINE_WORKFLOWS:
                 if wf in workflow_runs:
@@ -1123,6 +1149,9 @@ class GiteaClient:
                     # Use html_url from API response (includes correct run_number)
                     url = run.get("html_url", "")
                     workflows[wf] = (status, url)
+                else:
+                    # Workflow not found for this SHA - show as "not_run" (distinct from real pending)
+                    workflows[wf] = ("not_run", "")
 
             result = CIHealth.from_workflows(short_sha, workflows)
             _ci_health_cache[cache_key] = result

@@ -260,6 +260,13 @@
         .ci-success { color: #22c55e; }
         .ci-failure { color: #ef4444; }
         .ci-running { color: #eab308; }
+        .ci-pending { color: #eab308; }
+        .ci-queued { color: #eab308; }
+        .ci-waiting { color: #eab308; }
+        .ci-cancelled { color: #6b7280; }
+        .ci-skipped { color: #a1a1aa; }  /* Lighter gray than cancelled */
+        .ci-neutral { color: #6b7280; }
+        .ci-not_run { color: #52525b; }  /* Darker - hasn't run yet */
         .ci-unknown { color: #6b7280; }
 
         .ci-pipeline {
@@ -272,7 +279,6 @@
         .ci-pipeline .ci-step {
             margin-right: 0.5rem;
             text-decoration: none;
-            color: inherit;
         }
 
         a.ci-step {

@@ -107,8 +107,8 @@
                 {% if sprint.number == current_sprint_num %}
                 <span style="color: var(--success); font-size: 0.75rem;">(current)</span>
                 {% if ci_health and ci_health.state != "unknown" %}
-                <span class="ci-indicator ci-{{ ci_health.state }}" title="CI: {{ ci_health.state }} ({{ ci_health.sha }})">
-                    {% if ci_health.state == "success" %}✓{% elif ci_health.state == "failure" %}✗{% elif ci_health.state == "running" %}⏳{% endif %}
+                <span class="ci-indicator ci-{{ ci_health.state }}" title="CI: {{ ci_health.state }} ({{ ci_health.sha }})" aria-label="CI status: {{ ci_health.state }}">
+                    {% if ci_health.state == "success" %}✓{% elif ci_health.state == "failure" %}✗{% elif ci_health.state == "running" %}⏳{% elif ci_health.state == "cancelled" %}⊘{% elif ci_health.state == "pending" %}⏳{% elif ci_health.state == "skipped" %}–{% else %}○{% endif %}
                 </span>
                 {% endif %}
                 {% endif %}
@@ -134,9 +134,9 @@
                 {% if sprint.number == current_sprint_num and ci_health and ci_health.workflows %}
                     {% for abbrev, status, icon, url in ci_health.workflow_abbrevs %}
                     {% if url %}
-                    <a href="{{ url }}" target="_blank" class="ci-step ci-{{ status }}" title="View {{ abbrev }} logs">{{ abbrev }}:{{ icon }}</a>
+                    <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="ci-step ci-{{ status }}" title="View {{ abbrev }} logs" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</a>
                     {% else %}
-                    <span class="ci-step ci-{{ status }}">{{ abbrev }}:{{ icon }}</span>
+                    <span class="ci-step ci-{{ status }}" title="{% if status == 'not_run' %}Not run yet{% else %}{{ status }}{% endif %}" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</span>
                     {% endif %}
                     {% endfor %}
                 {% else %}
