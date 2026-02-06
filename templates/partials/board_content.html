@@ -132,8 +132,12 @@
             <!-- CI pipeline status below progress bar (or placeholder for consistent height) -->
             <div class="ci-pipeline">
                 {% if sprint.number == current_sprint_num and ci_health and ci_health.workflows %}
-                    {% for abbrev, status, icon in ci_health.workflow_abbrevs %}
+                    {% for abbrev, status, icon, url in ci_health.workflow_abbrevs %}
+                    {% if url %}
+                    <a href="{{ url }}" target="_blank" class="ci-step ci-{{ status }}" title="View {{ abbrev }} logs">{{ abbrev }}:{{ icon }}</a>
+                    {% else %}
                     <span class="ci-step ci-{{ status }}">{{ abbrev }}:{{ icon }}</span>
+                    {% endif %}
                     {% endfor %}
                 {% else %}
                     &nbsp;

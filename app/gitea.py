@@ -474,16 +474,24 @@ class CIHealth:
 
     sha: str  # short SHA
     state: str  # "success", "failure", "pending", "running", "unknown"
-    workflows: tuple[tuple[str, str], ...]  # ((workflow_file, status), ...)
+    # ((workflow_file, status, url), ...) - url may be empty string if unavailable
+    workflows: tuple[tuple[str, str, str], ...]
 
     @classmethod
-    def from_workflows(cls, sha: str, workflows: dict[str, str]) -> "CIHealth":
-        """Create CIHealth from workflow dict, deriving overall state."""
+    def from_workflows(
+        cls, sha: str, workflows: dict[str, tuple[str, str]]
+    ) -> "CIHealth":
+        """Create CIHealth from workflow dict, deriving overall state.
+
+        Args:
+            sha: Short commit SHA.
+            workflows: Dict mapping workflow_file to (status, url) tuple.
+        """
         if not workflows:
             return cls(sha=sha, state="unknown", workflows=())
 
         # Derive state from workflow statuses
-        statuses = list(workflows.values())
+        statuses = [status for status, _url in workflows.values()]
         if any(s == "failure" for s in statuses):
             state = "failure"
         elif any(s in ("running", "waiting") for s in statuses):
@@ -496,14 +504,14 @@ class CIHealth:
         return cls(
             sha=sha,
             state=state,
-            workflows=tuple(workflows.items()),
+            workflows=tuple((wf, status, url) for wf, (status, url) in workflows.items()),
         )
 
     @property
-    def workflow_abbrevs(self) -> list[tuple[str, str, str]]:
+    def workflow_abbrevs(self) -> list[tuple[str, str, str, str]]:
         """Get workflow abbreviations with status for display.
 
-        Returns list of (abbrev, status, icon) tuples.
+        Returns list of (abbrev, status, icon, url) tuples.
         """
         abbrev_map = {
             "ci.yml": "C",
@@ -518,8 +526,8 @@ class CIHealth:
             "waiting": "⏳",
         }
         return [
-            (abbrev_map.get(wf, wf[:1].upper()), status, icon_map.get(status, "?"))
-            for wf, status in self.workflows
+            (abbrev_map.get(wf, wf[:1].upper()), status, icon_map.get(status, "?"), url)
+            for wf, status, url in self.workflows
         ]
 
 
@@ -1102,16 +1110,26 @@ class GiteaClient:
                     ) > workflow_runs[workflow_file].get("run_number", 0):
                         workflow_runs[workflow_file] = run
 
-            # Build workflow status map
-            workflows: dict[str, str] = {}
+            # Build workflow status map with URLs
+            # URL format: {base_url}/{owner}/{repo}/actions/runs/{run_id}
+            # base_url is guaranteed non-None after __init__ validation
+            base_html_url = (self.base_url or "").rstrip("/")
+            workflows: dict[str, tuple[str, str]] = {}
             for wf in PIPELINE_WORKFLOWS:
                 if wf in workflow_runs:
                     run = workflow_runs[wf]
                     status = run.get("status", "")
                     if status == "completed":
-                        workflows[wf] = run.get("conclusion", "unknown")
+                        status = run.get("conclusion", "unknown")
+                    # else: status is running, waiting, etc.
+
+                    # Build URL to the run
+                    run_id = run.get("id", "")
+                    if run_id:
+                        url = f"{base_html_url}/{self.owner}/{self.repo}/actions/runs/{run_id}"
                     else:
-                        workflows[wf] = status  # running, waiting, etc.
+                        url = ""
+                    workflows[wf] = (status, url)
 
             result = CIHealth.from_workflows(short_sha, workflows)
             _ci_health_cache[cache_key] = result
