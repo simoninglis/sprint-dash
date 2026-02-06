@@ -301,6 +301,26 @@
         border-radius: 6px 6px 0 0;
     }
 
+    /* Shared status banner styles */
+    .card-status-banner {
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 0.2rem 0.5rem;
+        margin: -0.75rem -0.75rem 0.5rem -0.75rem;
+        border-radius: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+    }
+
+    .card-epic-rail + .card-status-banner {
+        margin-top: -0.5rem;
+    }
+
+    .card-status-banner .status-icon {
+        font-size: 0.8rem;
+    }
+
     /* Blocked card styling */
     .board-card.card-blocked {
         border-left-color: #ef4444;
@@ -309,46 +329,22 @@
     .card-blocked-banner {
         background: rgba(239, 68, 68, 0.15);
         color: #ef4444;
-        font-size: 0.7rem;
-        font-weight: 700;
-        padding: 0.2rem 0.5rem;
-        margin: -0.75rem -0.75rem 0.5rem -0.75rem;
-        border-radius: 0;
-        display: flex;
-        align-items: center;
-        gap: 0.3rem;
     }
 
-    .card-epic-rail + .card-blocked-banner {
-        margin-top: -0.5rem;
-        border-radius: 0;
+    /* Needs polish card styling */
+    .board-card.card-polish {
+        border-left-color: #f59e0b;
     }
 
-    .blocked-icon {
-        font-size: 0.8rem;
+    .card-polish-banner {
+        background: rgba(245, 158, 11, 0.15);
+        color: #f59e0b;
     }
 
     /* Closed/done banner */
     .card-closed-banner {
         background: rgba(34, 197, 94, 0.15);
         color: #22c55e;
-        font-size: 0.7rem;
-        font-weight: 700;
-        padding: 0.2rem 0.5rem;
-        margin: -0.75rem -0.75rem 0.5rem -0.75rem;
-        border-radius: 0;
-        display: flex;
-        align-items: center;
-        gap: 0.3rem;
-    }
-
-    .card-epic-rail + .card-closed-banner {
-        margin-top: -0.5rem;
-        border-radius: 0;
-    }
-
-    .closed-icon {
-        font-size: 0.8rem;
     }
 
     /* Dependency badges */

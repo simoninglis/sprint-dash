@@ -1,5 +1,5 @@
 {# Board card - expects 'issue' to be a BoardIssue #}
-<div class="board-card card-{{ issue.state }} {% if issue.is_blocked %}card-blocked{% endif %}"
+<div class="board-card card-{{ issue.state }} {% if issue.is_blocked %}card-blocked{% elif issue.needs_polish and issue.state == 'open' %}card-polish{% endif %}"
      style="--epic-color: {{ issue.epic_color }};"
      hx-get="/issues/{{ issue.number }}"
      hx-target="#content"
@@ -10,14 +10,18 @@
     <div class="card-epic-rail"></div>
     {% endif %}
 
-    {# Status banners #}
+    {# Status banners - priority: closed > blocked > needs-polish #}
     {% if issue.state == "closed" %}
-    <div class="card-closed-banner">
-        <span class="closed-icon">&#x2713;</span> DONE
+    <div class="card-status-banner card-closed-banner">
+        <span class="status-icon">&#x2713;</span> DONE
     </div>
     {% elif issue.is_blocked %}
-    <div class="card-blocked-banner">
-        <span class="blocked-icon">&#x26A0;</span> BLOCKED
+    <div class="card-status-banner card-blocked-banner">
+        <span class="status-icon">&#x26A0;</span> BLOCKED
+    </div>
+    {% elif issue.needs_polish and issue.state == "open" %}
+    <div class="card-status-banner card-polish-banner">
+        <span class="status-icon">&#x270E;</span> NEEDS POLISH
     </div>
     {% endif %}
 

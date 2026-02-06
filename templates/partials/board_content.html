@@ -85,7 +85,7 @@
     </div>
 
     <!-- Sprint Columns -->
-    {% for sprint, issues, blocked_count in sprint_columns %}
+    {% for sprint, issues, blocked_count, polish_count in sprint_columns %}
     <div class="board-column {% if sprint.number == current_sprint_num %}current-sprint{% endif %}">
         <div class="column-header">
             <div class="column-title">
@@ -103,7 +103,11 @@
                 {% endif %}
             </div>
             <div class="column-stats">
-                {{ sprint.closed_count }}/{{ sprint.total }} done ({{ sprint.progress_pct }}%)
+                {{ sprint.closed_count }}/{{ sprint.total }} done
+                {% if polish_count > 0 %}
+                <span class="needs-polish-count">({{ polish_count }} polish)</span>
+                {% endif %}
+                ({{ sprint.progress_pct }}%)
                 <span style="margin-left: 0.5rem; color: var(--text-muted);">
                     ~{{ sprint.total_points }} pts
                 </span>
@@ -269,5 +273,10 @@
 
     .epic-group-body {
         padding-top: 0.5rem;
+    }
+
+    .needs-polish-count {
+        color: #f59e0b;
+        font-weight: 600;
     }
 </style>

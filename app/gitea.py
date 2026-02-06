@@ -309,6 +309,11 @@ class Issue:
         return "ready" in self.labels
 
     @property
+    def needs_polish(self) -> bool:
+        """True if issue has needs-polish label."""
+        return "needs-polish" in self.labels
+
+    @property
     def issue_type(self) -> str:
         """Infer issue type from labels."""
         for label in self.labels:

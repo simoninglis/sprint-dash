@@ -135,7 +135,10 @@ async def board(
         sorted_issues = _sort_board_issues(issues, show_closed)
         board_issues = client.to_board_issues(sorted_issues)
         blocked_count = sum(1 for bi in board_issues if bi.is_blocked)
-        sorted_sprint_columns.append((sprint, board_issues, blocked_count))
+        polish_count = sum(
+            1 for bi in board_issues if bi.state == "open" and bi.needs_polish
+        )
+        sorted_sprint_columns.append((sprint, board_issues, blocked_count, polish_count))
 
     # Get filter options
     all_issues = board_data.backlog + [i for s in board_data.sprints for i in s.issues]
@@ -213,6 +216,15 @@ async def board_column(
     # Convert to BoardIssues with dependency info (consistent with full board view)
     board_issues = client.to_board_issues(issues)
     blocked_count = sum(1 for bi in board_issues if bi.is_blocked)
+    polish_count = sum(
+        1 for bi in board_issues if bi.state == "open" and bi.needs_polish
+    )
+
+    # Build enhanced column_stats with polish count (consistent with main board)
+    if polish_count > 0:
+        column_stats = column_stats.replace(
+            " done", f" done ({polish_count} polish)"
+        )
 
     return templates.TemplateResponse(
         "partials/board_column.html",
@@ -223,6 +235,7 @@ async def board_column(
             "column_stats": column_stats,
             "show_closed": show_closed,
             "blocked_count": blocked_count,
+            "polish_count": polish_count,
         },
     )
 
