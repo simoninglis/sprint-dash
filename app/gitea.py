@@ -5,7 +5,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
@@ -16,9 +16,10 @@ from cachetools import TTLCache
 logger = logging.getLogger(__name__)
 
 # Module-level cache for API responses (60-second TTL)
-_issues_cache: TTLCache[tuple[str, str | None], list["Issue"]] = TTLCache(
-    maxsize=100, ttl=60
-)
+# Cache keys include base_url and repo identifier to support multi-instance scenarios
+_issues_cache: TTLCache[
+    tuple[str | None, str | None, str | None, str, str | None], list["Issue"]
+] = TTLCache(maxsize=100, ttl=60)
 
 # Pagination limits
 MAX_PAGES = 100
@@ -47,8 +48,8 @@ PIPELINE_WORKFLOWS: tuple[str, ...] = (
     "staging-verify.yml",
 )
 
-# Cache for dependency counts (issue_number -> (blocked_by_count, blocks_count, blockers_list))
-_deps_cache: TTLCache[int, tuple[int, int, list[tuple[int, str, int | None]]]] = TTLCache(
+# Cache for dependency counts (repo:issue_number -> (blocked_by_count, blocks_count, blockers_list))
+_deps_cache: TTLCache[str, tuple[int, int, list[tuple[int, str, int | None]]]] = TTLCache(
     maxsize=500, ttl=60
 )
 
@@ -58,8 +59,11 @@ _epic_colors: dict[str, str] = {}
 # Milestone cache (60s TTL)
 _milestones_cache: TTLCache[str, list["Milestone"]] = TTLCache(maxsize=10, ttl=60)
 
-# CI health cache (60s TTL)
-_ci_health_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=1, ttl=60)
+# CI health cache (60s TTL for success, keyed by repo)
+_ci_health_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=60)
+
+# Separate short-lived cache for CI health failures (5s TTL) to avoid hammering API
+_ci_health_failure_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=5)
 
 
 def get_epic_color(epic_name: str | None) -> str:
@@ -87,6 +91,10 @@ def _get_ssl_verify() -> bool | str:
     if ca_bundle:
         return ca_bundle
     if os.environ.get("GITEA_INSECURE", "").lower() in ("1", "true", "yes"):
+        logger.warning(
+            "SSL verification disabled (GITEA_INSECURE=1). "
+            "This is insecure and should not be used in production."
+        )
         return False
     return True
 
@@ -320,12 +328,13 @@ class Issue:
             if label.startswith("size/"):
                 return label.split("/")[1].upper()
 
-        # Fallback: parse from body (## Effort: S/M/L or **Effort:** S)
-        # Match "## Effort: S" or "## Effort\nS" or "**Effort:** M"
+        # Fallback: parse from body (## Effort: S/M/L/XL or **Effort:** S)
+        # Match "## Effort: S" or "## Effort\nS" or "**Effort:** M" or "XL"
         if self.body and (
             match := re.search(
-                r"(?:##\s*Effort[:\s]*|\*\*Effort:?\*\*[:\s]*)([SMLsml])\b",
+                r"(?:##\s*Effort[:\s]*|\*\*Effort:?\*\*[:\s]*)(XL|[SMLsml])\b",
                 self.body,
+                re.IGNORECASE,
             )
         ):
             return match.group(1).upper()
@@ -395,6 +404,23 @@ class Sprint:
         }.get(self.lifecycle_state, "")
 
 
+def _parse_start_date(description: str | None) -> date | None:
+    """Extract start_date from milestone description first line.
+
+    Expected format: 'start_date: YYYY-MM-DD' as the first line.
+    """
+    if not description:
+        return None
+    first_line = description.strip().split("\n")[0]
+    if first_line.startswith("start_date:"):
+        value = first_line.split(":", 1)[1].strip()
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
 @dataclass(frozen=True)
 class Milestone:
     """Gitea milestone for sprint lifecycle tracking."""
@@ -415,14 +441,22 @@ class Milestone:
         return None
 
     @property
+    def start_date(self) -> date | None:
+        """Get start_date from description (per ADR-0017)."""
+        return _parse_start_date(self.description)
+
+    @property
     def lifecycle_state(self) -> str:
-        """Derive lifecycle state from milestone state and created date."""
+        """Derive lifecycle state per ADR-0017.
+
+        - Closed → completed
+        - Open + start_date <= today → in_progress
+        - Open + start_date > today or null → planned
+        """
         if self.state == "closed":
             return "completed"
-        # Compare created_at to today (UTC)
-        created = datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
-        today = datetime.now(UTC).date()
-        if created.date() <= today:
+        start = self.start_date
+        if start is not None and start <= date.today():
             return "in_progress"
         return "planned"
 
@@ -499,7 +533,7 @@ class BacklogStats:
     @property
     def size_counts(self) -> dict[str, int]:
         """Count of issues by size."""
-        counts: dict[str, int] = {"S": 0, "M": 0, "L": 0, "?": 0}
+        counts: dict[str, int] = {"S": 0, "M": 0, "L": 0, "XL": 0, "?": 0}
         for issue in self.issues:
             size = issue.size or "?"
             counts[size] = counts.get(size, 0) + 1
@@ -610,6 +644,9 @@ class GiteaClient:
         # Normalize URL
         api_url = _normalize_base_url(self.base_url)
 
+        # Note: Using sync httpx.Client for simplicity. For a read-only dashboard
+        # with low concurrency this is acceptable. For high-load scenarios,
+        # consider switching to httpx.AsyncClient with async methods.
         self._client = httpx.Client(
             base_url=api_url,
             headers={
@@ -646,7 +683,8 @@ class GiteaClient:
         Returns:
             List of issues matching the filter
         """
-        cache_key = (state, labels)
+        # Include base_url in cache key for multi-instance support
+        cache_key = (self.base_url, self.owner, self.repo, state, labels)
 
         # Check cache first
         if cache_key in _issues_cache:
@@ -875,8 +913,9 @@ class GiteaClient:
             Tuple of (blocked_by_count, blocks_count, blockers_list)
             where blockers_list is [(issue_num, state, sprint_num), ...]
         """
-        if number in _deps_cache:
-            return _deps_cache[number]
+        cache_key = f"{self.base_url}:{self.owner}/{self.repo}:{number}"
+        if cache_key in _deps_cache:
+            return _deps_cache[cache_key]
 
         try:
             deps = self.get_issue_dependencies(number)
@@ -885,10 +924,11 @@ class GiteaClient:
             blockers = [(d.number, d.state, d.sprint) for d in deps]
             result = (len(deps), len(blocks), blockers)
 
-            _deps_cache[number] = result
+            _deps_cache[cache_key] = result
             return result
-        except GiteaError:
-            # On error, return empty deps
+        except GiteaError as e:
+            # Log error but return empty deps to avoid breaking the board
+            logger.warning(f"Failed to fetch dependencies for issue #{number}: {e}")
             return (0, 0, [])
 
     def to_board_issue(self, issue: Issue, fetch_deps: bool = True) -> BoardIssue:
@@ -918,7 +958,7 @@ class GiteaClient:
         Returns:
             List of milestones matching the filter (only sprint milestones)
         """
-        cache_key = f"milestones:{state}"
+        cache_key = f"{self.base_url}:{self.owner}/{self.repo}:milestones:{state}"
         if cache_key in _milestones_cache:
             return _milestones_cache[cache_key]
 
@@ -979,18 +1019,23 @@ class GiteaClient:
 
         return None  # No milestones = fallback to label-based
 
-    def get_main_sha(self) -> str:
+    def get_main_sha(self, short: bool = False) -> str:
         """Get the HEAD SHA of the main branch.
 
+        Args:
+            short: If True, return 8-char short SHA. Otherwise full SHA.
+
         Returns:
-            Short SHA (8 chars) of main branch HEAD, or "?" on error.
+            SHA of main branch HEAD, or "?" on error.
         """
         try:
             resp = self._client.get(f"/repos/{self.owner}/{self.repo}/branches/main")
             resp.raise_for_status()
             data = resp.json()
-            full_sha = data.get("commit", {}).get("id", "")
-            return full_sha[:8] if full_sha else "?"
+            full_sha: str = data.get("commit", {}).get("id", "")
+            if not full_sha:
+                return "?"
+            return full_sha[:8] if short else full_sha
         except (httpx.HTTPStatusError, httpx.RequestError):
             return "?"
 
@@ -1001,14 +1046,22 @@ class GiteaClient:
             CIHealth with overall state and per-workflow status.
             On error, returns CIHealth with state="unknown".
         """
-        cache_key = "ci_health"
+        cache_key = f"{self.base_url}:{self.owner}/{self.repo}:ci_health"
         if cache_key in _ci_health_cache:
             return _ci_health_cache[cache_key]
+        # Check short-lived failure cache to avoid hammering API on errors
+        if cache_key in _ci_health_failure_cache:
+            return _ci_health_failure_cache[cache_key]
 
         try:
-            sha = self.get_main_sha()
-            if sha == "?":
-                return CIHealth(sha="?", state="unknown", workflows=())
+            full_sha = self.get_main_sha(short=False)
+            if full_sha == "?":
+                # Cache the "unknown SHA" failure briefly
+                result = CIHealth(sha="?", state="unknown", workflows=())
+                _ci_health_failure_cache[cache_key] = result
+                return result
+
+            short_sha = full_sha[:8]
 
             # Fetch recent workflow runs
             resp = self._client.get(
@@ -1018,10 +1071,10 @@ class GiteaClient:
             resp.raise_for_status()
             runs = resp.json().get("workflow_runs", [])
 
-            # Filter runs for this SHA and group by workflow
+            # Filter runs for this SHA (exact match) and group by workflow
             workflow_runs: dict[str, dict] = {}
             for run in runs:
-                if run.get("head_sha", "").startswith(sha):
+                if run.get("head_sha", "") == full_sha:
                     # Extract workflow file from path (e.g., "ci.yml@refs/heads/main")
                     path = run.get("path", "")
                     workflow_file = path.split("@")[0] if "@" in path else path
@@ -1049,12 +1102,16 @@ class GiteaClient:
                     else:
                         workflows[wf] = status  # running, waiting, etc.
 
-            result = CIHealth.from_workflows(sha, workflows)
+            result = CIHealth.from_workflows(short_sha, workflows)
             _ci_health_cache[cache_key] = result
             return result
 
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            return CIHealth(sha="?", state="unknown", workflows=())
+        except (httpx.HTTPStatusError, httpx.RequestError) as e:
+            logger.warning(f"Failed to fetch CI health: {e}")
+            # Cache the failure briefly (5s) to avoid hammering API on errors
+            result = CIHealth(sha="?", state="unknown", workflows=())
+            _ci_health_failure_cache[cache_key] = result
+            return result
 
     def get_board_data(self, num_future_sprints: int = 2) -> BoardData:
         """Get all data needed for board view in a single fetch.

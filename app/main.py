@@ -210,14 +210,19 @@ async def board_column(
 
     issues = _sort_board_issues(issues, show_closed)
 
+    # Convert to BoardIssues with dependency info (consistent with full board view)
+    board_issues = client.to_board_issues(issues)
+    blocked_count = sum(1 for bi in board_issues if bi.is_blocked)
+
     return templates.TemplateResponse(
         "partials/board_column.html",
         {
             "request": request,
-            "issues": issues,
+            "issues": board_issues,
             "column_title": column_title,
             "column_stats": column_stats,
             "show_closed": show_closed,
+            "blocked_count": blocked_count,
         },
     )
 
