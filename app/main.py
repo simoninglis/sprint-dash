@@ -66,10 +66,10 @@ def _sort_board_issues(issues: list, show_closed: bool = False) -> list:
 async def board(
     request: Request,
     center: int | None = Query(default=None),
-    show_closed: bool = Query(default=False),
+    show_closed: bool = Query(default=True),
     type_filter: str = Query(default=""),
     epic_filter: str = Query(default=""),
-    group_by_epic: bool = Query(default=False),
+    group_by_epic: bool = Query(default=True),
 ):
     """Sprint board view - 5 columns: Backlog, Previous, Current, Next, Next+1."""
     try:

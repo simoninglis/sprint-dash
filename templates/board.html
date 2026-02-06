@@ -41,6 +41,11 @@
             <!-- Hidden center param to preserve navigation when filtering -->
             <input type="hidden" class="board-filter" name="center" value="{{ center_sprint_num }}">
 
+            <span class="auto-refresh-indicator" title="Auto-refreshes every 30s">
+                <span class="pulse-dot"></span>
+                Auto
+            </span>
+
             <button class="refresh-btn" hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
                 Refresh
                 <span class="htmx-indicator"><span class="spinner"></span></span>
@@ -48,8 +53,12 @@
         </div>
     </div>
 
-    <!-- Board columns -->
-    <div id="board-content">
+    <!-- Board columns (auto-refresh every 30s) -->
+    <div id="board-content"
+         hx-get="/board"
+         hx-trigger="every 30s"
+         hx-include=".board-filter"
+         hx-swap="innerHTML">
         {% include "partials/board_content.html" %}
     </div>
 </div>
@@ -102,6 +111,36 @@
 
     .board-checkbox input {
         width: auto;
+    }
+
+    .auto-refresh-indicator {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        padding: 0.4rem 0.6rem;
+        background: var(--primary);
+        border-radius: 4px;
+    }
+
+    .pulse-dot {
+        width: 8px;
+        height: 8px;
+        background: var(--success);
+        border-radius: 50%;
+        animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    /* Show spinner during HTMX request */
+    #board-content.htmx-request .pulse-dot {
+        animation: none;
+        background: var(--warning);
     }
 
     .refresh-btn {
