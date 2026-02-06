@@ -1111,9 +1111,6 @@ class GiteaClient:
                         workflow_runs[workflow_file] = run
 
             # Build workflow status map with URLs
-            # URL format: {base_url}/{owner}/{repo}/actions/runs/{run_id}
-            # base_url is guaranteed non-None after __init__ validation
-            base_html_url = (self.base_url or "").rstrip("/")
             workflows: dict[str, tuple[str, str]] = {}
             for wf in PIPELINE_WORKFLOWS:
                 if wf in workflow_runs:
@@ -1123,12 +1120,8 @@ class GiteaClient:
                         status = run.get("conclusion", "unknown")
                     # else: status is running, waiting, etc.
 
-                    # Build URL to the run
-                    run_id = run.get("id", "")
-                    if run_id:
-                        url = f"{base_html_url}/{self.owner}/{self.repo}/actions/runs/{run_id}"
-                    else:
-                        url = ""
+                    # Use html_url from API response (includes correct run_number)
+                    url = run.get("html_url", "")
                     workflows[wf] = (status, url)
 
             result = CIHealth.from_workflows(short_sha, workflows)
