@@ -77,12 +77,39 @@ class Issue:
     created_at: str
     updated_at: str
     closed_at: str | None
+    body: str  # For parsing size/effort from issue body
 
 @dataclass(frozen=True)
 class Sprint:
     number: int
     issues: tuple[Issue, ...]
-    # Derived: open_count, closed_count, progress_pct
+    lifecycle_state: str  # "in_progress", "planned", "completed", "unknown"
+    # Derived: open_count, closed_count, progress_pct, lifecycle_indicator
+
+@dataclass(frozen=True)
+class Milestone:
+    id: int
+    title: str           # "Sprint 45"
+    state: str           # "open" or "closed"
+    open_issues: int
+    closed_issues: int
+    # Derived: sprint_number, lifecycle_state
+
+@dataclass(frozen=True)
+class CIHealth:
+    sha: str             # short SHA of main branch HEAD
+    state: str           # "success", "failure", "running", "pending", "unknown"
+    workflows: tuple[tuple[str, str], ...]  # ((workflow_file, status), ...)
+    # Factory: CIHealth.from_workflows(sha, {workflow: status})
+    # Derived: workflow_abbrevs → [(abbrev, status, icon), ...]
+
+@dataclass
+class BoardIssue:
+    issue: Issue
+    blocked_by_count: int
+    blocks_count: int
+    blockers: list[tuple[int, str, int | None]]  # (issue_num, state, sprint_num)
+    # Derived: is_blocked, open_blocker_count, blocker_context
 ```
 
 ## HTMX Patterns
@@ -118,6 +145,29 @@ GITEA_OWNER=singlis
 GITEA_REPO=deckengine
 ```
 
+## CI Pipeline Health
+
+The dashboard shows CI pipeline status for the current sprint via the **Gitea Actions Runs API**.
+
+**Why Actions Runs API instead of Commit Status API:**
+- Commit status API (`/commits/{sha}/status`) only reports statuses set by `ci.yml` jobs
+- Downstream chained workflows (build, staging-deploy, staging-verify) don't set commit statuses on the original commit
+- The Actions Runs API (`/actions/runs`) shows all workflow runs and gives the full pipeline view
+
+**API pattern:**
+1. Get main branch SHA: `GET /repos/{owner}/{repo}/branches/main` → `response.commit.id`
+2. Get recent runs: `GET /repos/{owner}/{repo}/actions/runs?limit=20`
+3. Filter runs by SHA, group by workflow file (from `path` field: `"ci.yml@refs/heads/main"` → `"ci.yml"`)
+4. Take latest run per workflow, map `status`/`conclusion` to display state
+
+**Pipeline workflows tracked** (`PIPELINE_WORKFLOWS` constant):
+- `ci.yml` → **C** (Lint, Unit Tests, Integration Tests)
+- `build.yml` → **B** (Build and push Docker images)
+- `staging-deploy.yml` → **D** (Deploy to staging)
+- `staging-verify.yml` → **V** (Smoke, E2E, visual tests)
+
+**Display:** Home page sprint card and board current sprint column show `✓`/`✗`/`⏳` with per-workflow breakdown.
+
 ## Future Enhancements (Phase 2)
 
 | Feature | Storage Needed |
@@ -139,11 +189,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 ## Current State
 
-MVP scaffolded with:
-- `app/gitea.py` - Gitea API client
-- `app/main.py` - FastAPI routes
-- `templates/` - Jinja2 + HTMX templates
-- Basic dark theme CSS
+Beyond MVP with:
+- `app/gitea.py` (~1100 lines) - Gitea API client with issues, sprints, milestones, dependencies, CI health
+- `app/main.py` (~420 lines) - FastAPI routes with board, backlog, search, issue detail views
+- `templates/` - Jinja2 + HTMX templates with dark theme, board view, filters
+- CI pipeline health integration via Actions Runs API
+- Dependency tracking with blocked/blocker indicators on board cards
+- Milestone-based sprint lifecycle (via ADR-0017)
 
 ## TODO
 
@@ -154,6 +206,10 @@ MVP scaffolded with:
 - [x] Error handling for API failures (GiteaError + error.html partial)
 - [x] Tea CLI config integration (falls back to ~/.config/tea/config.yml)
 - [x] Pagination improvements with max_pages limit and truncation warnings
+- [x] CI pipeline health on home and board views
+- [x] Issue dependency tracking (blocked-by / blocks)
+- [x] Milestone-based sprint lifecycle state
+- [x] Board view with Kanban columns, filters, epic grouping
 - [ ] Deploy behind Caddy
 
 ## Design Principles

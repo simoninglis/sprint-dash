@@ -10,8 +10,12 @@
     <div class="card-epic-rail"></div>
     {% endif %}
 
-    {# Blocked banner #}
-    {% if issue.is_blocked %}
+    {# Status banners #}
+    {% if issue.state == "closed" %}
+    <div class="card-closed-banner">
+        <span class="closed-icon">&#x2713;</span> DONE
+    </div>
+    {% elif issue.is_blocked %}
     <div class="card-blocked-banner">
         <span class="blocked-icon">&#x26A0;</span> BLOCKED
     </div>

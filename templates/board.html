@@ -38,12 +38,8 @@
                 Group by epic
             </label>
 
-            <select class="board-filter" name="columns"
-                    hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
-                <option value="3" {% if columns == 3 %}selected{% endif %}>3 columns</option>
-                <option value="4" {% if columns == 4 %}selected{% endif %}>4 columns</option>
-                <option value="5" {% if columns == 5 %}selected{% endif %}>5 columns</option>
-            </select>
+            <!-- Hidden center param to preserve navigation when filtering -->
+            <input type="hidden" class="board-filter" name="center" value="{{ center_sprint_num }}">
 
             <button class="refresh-btn" hx-get="/board" hx-target="#board-content" hx-include=".board-filter">
                 Refresh
@@ -124,12 +120,10 @@
         opacity: 0.9;
     }
 
-    /* Board grid */
+    /* Board grid - 5 columns: Backlog + 4 sprints */
     .board-grid {
         display: grid;
-        grid-template-columns: repeat({{ columns }}, 1fr);
         gap: 1rem;
-        min-height: calc(100vh - 200px);
     }
 
     /* Column styles */
@@ -138,8 +132,6 @@
         border-radius: 8px;
         display: flex;
         flex-direction: column;
-        min-height: 400px;
-        max-height: calc(100vh - 220px);
     }
 
     .column-header {
@@ -165,7 +157,6 @@
 
     .column-body {
         flex: 1;
-        overflow-y: auto;
         padding: 0.75rem;
     }
 
@@ -295,6 +286,29 @@
     }
 
     .blocked-icon {
+        font-size: 0.8rem;
+    }
+
+    /* Closed/done banner */
+    .card-closed-banner {
+        background: rgba(34, 197, 94, 0.15);
+        color: #22c55e;
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 0.2rem 0.5rem;
+        margin: -0.75rem -0.75rem 0.5rem -0.75rem;
+        border-radius: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+    }
+
+    .card-epic-rail + .card-closed-banner {
+        margin-top: -0.5rem;
+        border-radius: 0;
+    }
+
+    .closed-icon {
         font-size: 0.8rem;
     }
 

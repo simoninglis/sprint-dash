@@ -3,6 +3,9 @@
     <li class="issue-item">
         <span class="issue-number" style="font-size: 1.2rem; font-weight: bold;">
             Sprint {{ sprint.number }}
+            <span class="lifecycle-indicator lifecycle-{{ sprint.lifecycle_state }}">
+                {{ sprint.lifecycle_indicator }}
+            </span>
         </span>
         <span class="issue-title">
             {{ sprint.open_count }} open / {{ sprint.closed_count }} closed

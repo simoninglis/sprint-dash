@@ -1,12 +1,13 @@
 """Sprint Dashboard - FastAPI application."""
 
+import contextlib
 from pathlib import Path
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .gitea import BacklogStats, ConfigError, GiteaError, get_client
+from .gitea import BacklogStats, CIHealth, ConfigError, GiteaError, get_client
 
 app = FastAPI(title="Sprint Dashboard")
 
@@ -28,6 +29,11 @@ async def home(request: Request):
             "partials/error.html", {"request": request, "error": str(e)}
         )
 
+    # Fetch CI health (don't let failures break the page)
+    ci_health: CIHealth | None = None
+    with contextlib.suppress(Exception):
+        ci_health = client.get_ci_health()
+
     return templates.TemplateResponse(
         "home.html",
         {
@@ -35,6 +41,7 @@ async def home(request: Request):
             "current_sprint": current,
             "sprints": sprints[:5],
             "ready_count": len(ready_queue),
+            "ci_health": ci_health,
         },
     )
 
@@ -58,13 +65,13 @@ def _sort_board_issues(issues: list, show_closed: bool = False) -> list:
 @app.get("/board", response_class=HTMLResponse)
 async def board(
     request: Request,
-    columns: int = Query(default=4, ge=3, le=5),
+    center: int | None = Query(default=None),
     show_closed: bool = Query(default=False),
     type_filter: str = Query(default=""),
     epic_filter: str = Query(default=""),
     group_by_epic: bool = Query(default=False),
 ):
-    """Sprint board view - Kanban-style columns."""
+    """Sprint board view - 5 columns: Backlog, Previous, Current, Next, Next+1."""
     try:
         client = get_client()
         board_data = client.get_board_data()
@@ -72,6 +79,11 @@ async def board(
         return templates.TemplateResponse(
             "partials/error.html", {"request": request, "error": str(e)}
         )
+
+    # Fetch CI health (don't let failures break the page)
+    ci_health: CIHealth | None = None
+    with contextlib.suppress(Exception):
+        ci_health = client.get_ci_health()
 
     # Apply filters to backlog
     backlog = board_data.backlog
@@ -89,16 +101,28 @@ async def board(
     # Count blocked issues in backlog
     backlog_blocked_count = sum(1 for bi in ready_backlog_board if bi.is_blocked)
 
-    # Determine which sprints to show
-    current = board_data.current_sprint
-    sprint_columns = []
+    # Build sprint lookup by number
+    sprint_by_num = {s.number: s for s in board_data.sprints}
+    all_sprint_nums = sorted(sprint_by_num.keys())
 
-    if current:
-        sprint_columns.append(current)
-        # Add future sprints
-        future = [s for s in board_data.sprints if s.number > current.number]
-        future.sort(key=lambda s: s.number)
-        sprint_columns.extend(future[: columns - 2])  # -2 for backlog + current
+    # Determine center sprint (default to current)
+    current_sprint_num = board_data.current_sprint_num
+    center_sprint_num = center if center is not None else current_sprint_num
+
+    # Calculate navigation bounds
+    min_sprint = min(all_sprint_nums) if all_sprint_nums else 0
+    max_sprint = max(all_sprint_nums) if all_sprint_nums else 0
+    can_go_back = center_sprint_num and center_sprint_num > min_sprint
+    can_go_forward = center_sprint_num and center_sprint_num < max_sprint
+
+    # Build 4 sprint columns: center-1, center, center+1, center+2
+    sprint_columns = []
+    if center_sprint_num:
+        for offset in [-1, 0, 1, 2]:
+            sprint_num = center_sprint_num + offset
+            sprint = sprint_by_num.get(sprint_num)
+            if sprint:
+                sprint_columns.append(sprint)
 
     # Sort issues within each sprint and convert to BoardIssues
     sorted_sprint_columns = []
@@ -123,14 +147,18 @@ async def board(
         "ready_backlog": ready_backlog_board,
         "backlog_blocked_count": backlog_blocked_count,
         "sprint_columns": sorted_sprint_columns,
-        "current_sprint_num": board_data.current_sprint_num,
-        "columns": columns,
+        "current_sprint_num": current_sprint_num,
+        "center_sprint_num": center_sprint_num,
+        "can_go_back": can_go_back,
+        "can_go_forward": can_go_forward,
+        "columns": 5,  # Fixed: backlog + 4 sprints
         "show_closed": show_closed,
         "type_filter": type_filter,
         "epic_filter": epic_filter,
         "group_by_epic": group_by_epic,
         "all_types": all_types,
         "all_epics": all_epics,
+        "ci_health": ci_health,
     }
 
     if request.headers.get("HX-Request"):

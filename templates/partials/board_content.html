@@ -1,3 +1,38 @@
+<!-- Navigation Header -->
+<div class="board-nav">
+    <button class="nav-btn {% if not can_go_back %}disabled{% endif %}"
+            {% if can_go_back %}
+            hx-get="/board?center={{ center_sprint_num - 1 }}&show_closed={{ show_closed }}&type_filter={{ type_filter }}&epic_filter={{ epic_filter }}&group_by_epic={{ group_by_epic }}"
+            hx-target="#board-content"
+            hx-push-url="true"
+            {% endif %}
+            {% if not can_go_back %}disabled{% endif %}>
+        ← Earlier
+    </button>
+    <span class="nav-info">
+        Viewing sprints around
+        <strong>Sprint {{ center_sprint_num }}</strong>
+        {% if center_sprint_num != current_sprint_num %}
+        <a href="/board?show_closed={{ show_closed }}&type_filter={{ type_filter }}&epic_filter={{ epic_filter }}&group_by_epic={{ group_by_epic }}"
+           hx-get="/board?show_closed={{ show_closed }}&type_filter={{ type_filter }}&epic_filter={{ epic_filter }}&group_by_epic={{ group_by_epic }}"
+           hx-target="#board-content"
+           hx-push-url="true"
+           style="color: var(--accent); margin-left: 0.5rem;">
+            ↩ Back to current
+        </a>
+        {% endif %}
+    </span>
+    <button class="nav-btn {% if not can_go_forward %}disabled{% endif %}"
+            {% if can_go_forward %}
+            hx-get="/board?center={{ center_sprint_num + 1 }}&show_closed={{ show_closed }}&type_filter={{ type_filter }}&epic_filter={{ epic_filter }}&group_by_epic={{ group_by_epic }}"
+            hx-target="#board-content"
+            hx-push-url="true"
+            {% endif %}
+            {% if not can_go_forward %}disabled{% endif %}>
+        Later →
+    </button>
+</div>
+
 <div class="board-grid" style="grid-template-columns: repeat({{ columns }}, 1fr);">
     <!-- Backlog Column (Ready Queue) -->
     <div class="board-column backlog-column">
@@ -55,8 +90,16 @@
         <div class="column-header">
             <div class="column-title">
                 Sprint {{ sprint.number }}
+                <span class="lifecycle-indicator lifecycle-{{ sprint.lifecycle_state }}">
+                    {{ sprint.lifecycle_indicator }}
+                </span>
                 {% if sprint.number == current_sprint_num %}
                 <span style="color: var(--success); font-size: 0.75rem;">(current)</span>
+                {% if ci_health and ci_health.state != "unknown" %}
+                <span class="ci-indicator ci-{{ ci_health.state }}" title="CI: {{ ci_health.state }} ({{ ci_health.sha }})">
+                    {% if ci_health.state == "success" %}✓{% elif ci_health.state == "failure" %}✗{% elif ci_health.state == "running" %}⏳{% endif %}
+                </span>
+                {% endif %}
                 {% endif %}
             </div>
             <div class="column-stats">
@@ -70,6 +113,16 @@
             </div>
             <div class="column-progress">
                 <div class="column-progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
+            </div>
+            <!-- CI pipeline status below progress bar (or placeholder for consistent height) -->
+            <div class="ci-pipeline">
+                {% if sprint.number == current_sprint_num and ci_health and ci_health.workflows %}
+                    {% for abbrev, status, icon in ci_health.workflow_abbrevs %}
+                    <span class="ci-step ci-{{ status }}">{{ abbrev }}:{{ icon }}</span>
+                    {% endfor %}
+                {% else %}
+                    &nbsp;
+                {% endif %}
             </div>
         </div>
         <div class="column-body">
@@ -117,13 +170,18 @@
     </div>
     {% endfor %}
 
-    <!-- Empty columns if needed -->
+    <!-- Empty columns if needed (for future sprints not yet created) -->
     {% set shown_columns = 1 + sprint_columns|length %}
     {% for i in range(columns - shown_columns) %}
+    {% set empty_sprint_num = center_sprint_num + 2 - (columns - shown_columns - 1 - i) %}
     <div class="board-column">
         <div class="column-header">
-            <div class="column-title">Sprint {{ (current_sprint_num or 0) + sprint_columns|length + i + 1 }}</div>
+            <div class="column-title">Sprint {{ empty_sprint_num }} <span class="lifecycle-indicator lifecycle-planned">◻</span></div>
             <div class="column-stats">Planning</div>
+            <div class="column-progress">
+                <div class="column-progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="ci-pipeline">&nbsp;</div>
         </div>
         <div class="column-body">
             <div class="column-empty">
@@ -135,6 +193,42 @@
 </div>
 
 <style>
+    /* Navigation styles */
+    .board-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        background: var(--surface);
+        border-radius: 8px;
+        margin-bottom: 1rem;
+    }
+
+    .nav-btn {
+        background: var(--primary);
+        border: none;
+        color: var(--text);
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.875rem;
+        transition: background 0.2s;
+    }
+
+    .nav-btn:hover:not(.disabled) {
+        background: var(--accent);
+    }
+
+    .nav-btn.disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .nav-info {
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+
     /* Epic grouping styles */
     .epic-group {
         margin-bottom: 0.75rem;

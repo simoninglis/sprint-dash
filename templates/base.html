@@ -227,6 +227,34 @@
             padding: 2rem;
             color: var(--text-muted);
         }
+
+        .lifecycle-indicator {
+            font-size: 0.85em;
+            margin-left: 0.25rem;
+        }
+        .lifecycle-in_progress { color: var(--success); }
+        .lifecycle-planned { color: var(--text-muted); }
+        .lifecycle-completed { color: var(--accent); }
+
+        .ci-indicator {
+            font-size: 0.85rem;
+            margin-left: 0.5rem;
+        }
+        .ci-success { color: #22c55e; }
+        .ci-failure { color: #ef4444; }
+        .ci-running { color: #eab308; }
+        .ci-unknown { color: #6b7280; }
+
+        .ci-pipeline {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            min-height: 1.25rem;
+            line-height: 1.25rem;
+        }
+        .ci-pipeline .ci-step {
+            margin-right: 0.5rem;
+        }
     </style>
 </head>
 <body>

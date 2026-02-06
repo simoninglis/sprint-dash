@@ -5,6 +5,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -38,6 +39,14 @@ EPIC_COLORS: list[str] = [
     "#14b8a6",  # teal
 ]
 
+# CI pipeline workflows to track (in order: CI → Build → Deploy → Verify)
+PIPELINE_WORKFLOWS: tuple[str, ...] = (
+    "ci.yml",
+    "build.yml",
+    "staging-deploy.yml",
+    "staging-verify.yml",
+)
+
 # Cache for dependency counts (issue_number -> (blocked_by_count, blocks_count, blockers_list))
 _deps_cache: TTLCache[int, tuple[int, int, list[tuple[int, str, int | None]]]] = TTLCache(
     maxsize=500, ttl=60
@@ -45,6 +54,12 @@ _deps_cache: TTLCache[int, tuple[int, int, list[tuple[int, str, int | None]]]] =
 
 # Cache for epic -> color mapping (built per board load)
 _epic_colors: dict[str, str] = {}
+
+# Milestone cache (60s TTL)
+_milestones_cache: TTLCache[str, list["Milestone"]] = TTLCache(maxsize=10, ttl=60)
+
+# CI health cache (60s TTL)
+_ci_health_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=1, ttl=60)
 
 
 def get_epic_color(epic_name: str | None) -> str:
@@ -342,6 +357,7 @@ class Issue:
 class Sprint:
     number: int
     issues: tuple[Issue, ...]
+    lifecycle_state: str = "unknown"  # "in_progress", "planned", "completed", "unknown"
 
     @property
     def open_count(self) -> int:
@@ -368,6 +384,102 @@ class Sprint:
     @property
     def completed_points(self) -> int:
         return sum(i.points for i in self.issues if i.state == "closed")
+
+    @property
+    def lifecycle_indicator(self) -> str:
+        """Get visual indicator for lifecycle state."""
+        return {
+            "in_progress": "▶",
+            "planned": "◻",
+            "completed": "✓",
+        }.get(self.lifecycle_state, "")
+
+
+@dataclass(frozen=True)
+class Milestone:
+    """Gitea milestone for sprint lifecycle tracking."""
+
+    id: int
+    title: str
+    state: str  # "open" or "closed"
+    open_issues: int
+    closed_issues: int
+    created_at: str
+    description: str = ""
+
+    @property
+    def sprint_number(self) -> int | None:
+        """Extract sprint number from title like 'Sprint 45'."""
+        if match := re.match(r"Sprint (\d+)", self.title):
+            return int(match.group(1))
+        return None
+
+    @property
+    def lifecycle_state(self) -> str:
+        """Derive lifecycle state from milestone state and created date."""
+        if self.state == "closed":
+            return "completed"
+        # Compare created_at to today (UTC)
+        created = datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
+        today = datetime.now(UTC).date()
+        if created.date() <= today:
+            return "in_progress"
+        return "planned"
+
+
+@dataclass(frozen=True)
+class CIHealth:
+    """CI pipeline health for a commit."""
+
+    sha: str  # short SHA
+    state: str  # "success", "failure", "pending", "running", "unknown"
+    workflows: tuple[tuple[str, str], ...]  # ((workflow_file, status), ...)
+
+    @classmethod
+    def from_workflows(cls, sha: str, workflows: dict[str, str]) -> "CIHealth":
+        """Create CIHealth from workflow dict, deriving overall state."""
+        if not workflows:
+            return cls(sha=sha, state="unknown", workflows=())
+
+        # Derive state from workflow statuses
+        statuses = list(workflows.values())
+        if any(s == "failure" for s in statuses):
+            state = "failure"
+        elif any(s in ("running", "waiting") for s in statuses):
+            state = "running"
+        elif all(s == "success" for s in statuses):
+            state = "success"
+        else:
+            state = "pending"
+
+        return cls(
+            sha=sha,
+            state=state,
+            workflows=tuple(workflows.items()),
+        )
+
+    @property
+    def workflow_abbrevs(self) -> list[tuple[str, str, str]]:
+        """Get workflow abbreviations with status for display.
+
+        Returns list of (abbrev, status, icon) tuples.
+        """
+        abbrev_map = {
+            "ci.yml": "C",
+            "build.yml": "B",
+            "staging-deploy.yml": "D",
+            "staging-verify.yml": "V",
+        }
+        icon_map = {
+            "success": "✓",
+            "failure": "✗",
+            "running": "⏳",
+            "waiting": "⏳",
+        }
+        return [
+            (abbrev_map.get(wf, wf[:1].upper()), status, icon_map.get(status, "?"))
+            for wf, status in self.workflows
+        ]
 
 
 @dataclass
@@ -608,6 +720,8 @@ class GiteaClient:
     def get_sprints(self) -> list[Sprint]:
         """Get all sprints with issues."""
         all_issues = self._get_issues()
+        milestones = self.get_milestones(state="all")
+        milestone_map = {m.sprint_number: m for m in milestones if m.sprint_number}
 
         # Group by sprint
         sprint_map: dict[int, list[Issue]] = {}
@@ -615,10 +729,19 @@ class GiteaClient:
             if issue.sprint is not None:
                 sprint_map.setdefault(issue.sprint, []).append(issue)
 
-        return [
-            Sprint(number=num, issues=tuple(issues))
-            for num, issues in sorted(sprint_map.items(), reverse=True)
-        ]
+        # Build sprints with lifecycle state
+        sprints = []
+        for num, issues in sorted(sprint_map.items(), reverse=True):
+            milestone = milestone_map.get(num)
+            lifecycle = milestone.lifecycle_state if milestone else "unknown"
+            sprints.append(
+                Sprint(
+                    number=num,
+                    issues=tuple(issues),
+                    lifecycle_state=lifecycle,
+                )
+            )
+        return sprints
 
     def get_backlog(self) -> list[Issue]:
         """Get issues not in any sprint."""
@@ -631,8 +754,22 @@ class GiteaClient:
         return [i for i in ready_issues if i.sprint is None]
 
     def search_issues(self, query: str) -> list[Issue]:
-        """Search issues by title (client-side filter)."""
+        """Search issues by title or issue number (client-side filter).
+
+        Supports:
+        - Title search: "bug" matches issues with "bug" in title
+        - Number search: "123" or "#123" matches issue #123
+        """
         all_issues = self._get_issues()
+        query = query.strip()
+
+        # Check if query is an issue number (with or without #)
+        number_match = re.match(r"^#?(\d+)$", query)
+        if number_match:
+            target_num = int(number_match.group(1))
+            return [i for i in all_issues if i.number == target_num]
+
+        # Otherwise search by title
         query_lower = query.lower()
         return [i for i in all_issues if query_lower in i.title.lower()]
 
@@ -772,6 +909,153 @@ class GiteaClient:
         """Convert a list of Issues to BoardIssues."""
         return [self.to_board_issue(issue, fetch_deps) for issue in issues]
 
+    def get_milestones(self, state: str = "all") -> list[Milestone]:
+        """Fetch milestones with caching.
+
+        Args:
+            state: Milestone state filter ('open', 'closed', 'all')
+
+        Returns:
+            List of milestones matching the filter (only sprint milestones)
+        """
+        cache_key = f"milestones:{state}"
+        if cache_key in _milestones_cache:
+            return _milestones_cache[cache_key]
+
+        try:
+            resp = self._client.get(
+                f"/repos/{self.owner}/{self.repo}/milestones",
+                params={"state": state},
+            )
+            resp.raise_for_status()
+            milestones = [
+                Milestone(
+                    id=m["id"],
+                    title=m["title"],
+                    state=m["state"],
+                    open_issues=m["open_issues"],
+                    closed_issues=m["closed_issues"],
+                    created_at=m["created_at"],
+                    description=m.get("description", ""),
+                )
+                for m in resp.json()
+                if m["title"].startswith("Sprint ")  # Filter to sprint milestones
+            ]
+            _milestones_cache[cache_key] = milestones
+            return milestones
+        except httpx.HTTPStatusError as e:
+            raise GiteaError(f"Gitea API error: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            raise GiteaError(f"Network error: {e}") from e
+
+    def get_current_sprint_number(self) -> int | None:
+        """Get current sprint number from milestones (in_progress state).
+
+        Returns:
+            Sprint number of the current in-progress sprint, or lowest planned
+            sprint if none in progress, or None if no milestones exist.
+        """
+        milestones = self.get_milestones(state="open")
+
+        # Find in_progress milestones (lowest number first for multiple active)
+        in_progress = [
+            m
+            for m in milestones
+            if m.lifecycle_state == "in_progress" and m.sprint_number
+        ]
+        in_progress.sort(key=lambda m: m.sprint_number or 0)
+
+        if in_progress:
+            return in_progress[0].sprint_number
+
+        # Fallback: lowest planned sprint
+        planned = [
+            m for m in milestones if m.lifecycle_state == "planned" and m.sprint_number
+        ]
+        planned.sort(key=lambda m: m.sprint_number or 0)
+
+        if planned:
+            return planned[0].sprint_number
+
+        return None  # No milestones = fallback to label-based
+
+    def get_main_sha(self) -> str:
+        """Get the HEAD SHA of the main branch.
+
+        Returns:
+            Short SHA (8 chars) of main branch HEAD, or "?" on error.
+        """
+        try:
+            resp = self._client.get(f"/repos/{self.owner}/{self.repo}/branches/main")
+            resp.raise_for_status()
+            data = resp.json()
+            full_sha = data.get("commit", {}).get("id", "")
+            return full_sha[:8] if full_sha else "?"
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            return "?"
+
+    def get_ci_health(self) -> CIHealth:
+        """Get CI pipeline health for main branch HEAD.
+
+        Returns:
+            CIHealth with overall state and per-workflow status.
+            On error, returns CIHealth with state="unknown".
+        """
+        cache_key = "ci_health"
+        if cache_key in _ci_health_cache:
+            return _ci_health_cache[cache_key]
+
+        try:
+            sha = self.get_main_sha()
+            if sha == "?":
+                return CIHealth(sha="?", state="unknown", workflows=())
+
+            # Fetch recent workflow runs
+            resp = self._client.get(
+                f"/repos/{self.owner}/{self.repo}/actions/runs",
+                params={"limit": 20},
+            )
+            resp.raise_for_status()
+            runs = resp.json().get("workflow_runs", [])
+
+            # Filter runs for this SHA and group by workflow
+            workflow_runs: dict[str, dict] = {}
+            for run in runs:
+                if run.get("head_sha", "").startswith(sha):
+                    # Extract workflow file from path (e.g., "ci.yml@refs/heads/main")
+                    path = run.get("path", "")
+                    workflow_file = path.split("@")[0] if "@" in path else path
+
+                    # Only track pipeline workflows
+                    if workflow_file not in PIPELINE_WORKFLOWS:
+                        continue
+
+                    # Keep latest run per workflow (highest run_number)
+                    if (
+                        workflow_file not in workflow_runs
+                        or run.get("run_number", 0)
+                        > workflow_runs[workflow_file].get("run_number", 0)
+                    ):
+                        workflow_runs[workflow_file] = run
+
+            # Build workflow status map
+            workflows: dict[str, str] = {}
+            for wf in PIPELINE_WORKFLOWS:
+                if wf in workflow_runs:
+                    run = workflow_runs[wf]
+                    status = run.get("status", "")
+                    if status == "completed":
+                        workflows[wf] = run.get("conclusion", "unknown")
+                    else:
+                        workflows[wf] = status  # running, waiting, etc.
+
+            result = CIHealth.from_workflows(sha, workflows)
+            _ci_health_cache[cache_key] = result
+            return result
+
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            return CIHealth(sha="?", state="unknown", workflows=())
+
     def get_board_data(self, num_future_sprints: int = 2) -> BoardData:
         """Get all data needed for board view in a single fetch.
 
@@ -786,6 +1070,10 @@ class GiteaClient:
         # Single fetch for all issues (uses cache)
         all_issues = self._get_issues(state="all")
 
+        # Fetch milestones for lifecycle state
+        milestones = self.get_milestones(state="all")
+        milestone_map = {m.sprint_number: m for m in milestones if m.sprint_number}
+
         # Group by sprint
         sprint_map: dict[int, list[Issue]] = {}
         backlog: list[Issue] = []
@@ -797,20 +1085,30 @@ class GiteaClient:
                 # Only open issues in backlog
                 backlog.append(issue)
 
-        # Build sprint objects
-        sprints = [
-            Sprint(number=num, issues=tuple(issues))
-            for num, issues in sorted(sprint_map.items(), reverse=True)
-        ]
+        # Build sprint objects with lifecycle state from milestones
+        sprints = []
+        for num, issues in sorted(sprint_map.items(), reverse=True):
+            milestone = milestone_map.get(num)
+            lifecycle = milestone.lifecycle_state if milestone else "unknown"
+            sprints.append(
+                Sprint(
+                    number=num,
+                    issues=tuple(issues),
+                    lifecycle_state=lifecycle,
+                )
+            )
 
-        # Current sprint is highest numbered with open issues, or just highest
-        current_num = None
-        for s in sprints:
-            if s.open_count > 0:
-                current_num = s.number
-                break
+        # Get current sprint from milestones (authoritative)
+        current_num = self.get_current_sprint_number()
+
+        # Fallback to label-based if no milestones
         if current_num is None and sprints:
-            current_num = sprints[0].number
+            for s in sprints:
+                if s.open_count > 0:
+                    current_num = s.number
+                    break
+            if current_num is None:
+                current_num = sprints[0].number
 
         return BoardData(
             backlog=backlog,

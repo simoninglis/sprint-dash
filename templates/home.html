@@ -7,7 +7,7 @@
     {% if current_sprint %}
     <div class="card">
         <div class="card-header">
-            <h2>Sprint {{ current_sprint.number }}</h2>
+            <h2>Sprint {{ current_sprint.number }} <span class="lifecycle-indicator lifecycle-{{ current_sprint.lifecycle_state }}">{{ current_sprint.lifecycle_indicator }}</span>{% if ci_health and ci_health.state != "unknown" %}<span class="ci-indicator ci-{{ ci_health.state }}" title="CI: {{ ci_health.state }} ({{ ci_health.sha }})">{% if ci_health.state == "success" %}✓{% elif ci_health.state == "failure" %}✗{% elif ci_health.state == "running" %}⏳{% endif %}</span>{% endif %}</h2>
             <span class="badge badge-open">Current</span>
         </div>
         <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
@@ -50,7 +50,7 @@
     <ul class="issue-list">
         {% for sprint in sprints %}
         <li class="issue-item">
-            <span class="issue-number">Sprint {{ sprint.number }}</span>
+            <span class="issue-number">Sprint {{ sprint.number }} <span class="lifecycle-indicator lifecycle-{{ sprint.lifecycle_state }}">{{ sprint.lifecycle_indicator }}</span></span>
             <span class="issue-title">{{ sprint.total }} issues</span>
             <div class="progress-bar" style="width: 100px;">
                 <div class="progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
