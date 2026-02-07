@@ -131,7 +131,8 @@
             </div>
             <!-- CI pipeline status below progress bar (or placeholder for consistent height) -->
             <div class="ci-pipeline">
-                {% if sprint.number == current_sprint_num and ci_health and ci_health.workflows %}
+                {% if sprint.number == current_sprint_num %}
+                    {% if ci_health and ci_health.workflows %}
                     {% for abbrev, status, icon, url in ci_health.workflow_abbrevs %}
                     {% if url %}
                     <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="ci-step ci-{{ status }}" title="{{ abbrev }}: {{ status }} — View logs" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</a>
@@ -139,6 +140,18 @@
                     <span class="ci-step ci-{{ status }}" title="{% if status == 'not_run' %}Not run yet{% else %}{{ status }}{% endif %}" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</span>
                     {% endif %}
                     {% endfor %}
+                    {% endif %}
+                    {% if nightly_health and nightly_health.status != "unknown" %}
+                    {% if ci_health and ci_health.workflows %}<span class="ci-step-separator">|</span>{% endif %}
+                    {% if nightly_health.url %}
+                    <a href="{{ nightly_health.url }}" target="_blank" rel="noopener noreferrer" class="ci-step ci-{{ nightly_health.status }}" title="Nightly fuzz: {{ nightly_health.status }} ({{ nightly_health.time_ago }}) — View logs" aria-label="Nightly fuzz: {{ nightly_health.status }}">N:{{ nightly_health.icon }}</a>
+                    {% else %}
+                    <span class="ci-step ci-{{ nightly_health.status }}" title="Nightly fuzz: {{ nightly_health.status }} ({{ nightly_health.time_ago }})" aria-label="Nightly fuzz: {{ nightly_health.status }}">N:{{ nightly_health.icon }}</span>
+                    {% endif %}
+                    {% endif %}
+                    {% if not (ci_health and ci_health.workflows) and not (nightly_health and nightly_health.status != "unknown") %}
+                    &nbsp;
+                    {% endif %}
                 {% else %}
                     &nbsp;
                 {% endif %}

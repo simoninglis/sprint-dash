@@ -1,19 +1,21 @@
 {% extends "base.html" %}
 
+{% block title %}Epics - Sprint Dashboard{% endblock %}
+
 {% block content %}
 <div class="home-header">
-    <h1>Dashboard</h1>
+    <h1>Epics</h1>
     <span class="auto-refresh-indicator" title="Auto-refreshes every 30s">
         <span class="pulse-dot"></span>
         Auto
     </span>
 </div>
 
-<div id="home-content"
-     hx-get="{{ repo_url('') }}"
+<div id="epics-content"
+     hx-get="{{ repo_url('/epics') }}"
      hx-trigger="every 30s"
      hx-swap="innerHTML">
-    {% include "partials/home_content.html" %}
+    {% include "partials/epics_content.html" %}
 </div>
 
 <style>

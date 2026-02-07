@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Sprint Dashboard{% endblock %}</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"
+            integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC"
+            crossorigin="anonymous"></script>
     <style>
         :root {
             --bg: #1a1a2e;
@@ -290,6 +292,70 @@
             text-decoration: underline;
             opacity: 0.8;
         }
+
+        .ci-step-separator {
+            color: var(--primary);
+            margin: 0 0.15rem;
+        }
+
+        .nightly-alert {
+            border: 1px solid #ef4444;
+            background: linear-gradient(135deg, var(--surface) 0%, rgba(239, 68, 96, 0.1) 100%);
+        }
+
+        .nightly-crash-warning {
+            color: #ef4444;
+            font-weight: 600;
+            font-size: 0.875rem;
+            padding: 0.5rem 0;
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0,0,0,0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* Keyboard shortcut help overlay */
+        #kbd-help {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0,0,0,0.6);
+            justify-content: center;
+            align-items: center;
+        }
+        #kbd-help.visible { display: flex; }
+        #kbd-help .kbd-modal {
+            background: var(--surface);
+            border: 1px solid var(--primary);
+            border-radius: 8px;
+            padding: 1.5rem 2rem;
+            max-width: 420px;
+            width: 90%;
+        }
+        #kbd-help h3 { margin-bottom: 0.75rem; color: var(--accent); }
+        #kbd-help table { width: 100%; border-collapse: collapse; }
+        #kbd-help td { padding: 0.3rem 0; }
+        #kbd-help td:first-child { text-align: right; padding-right: 1rem; white-space: nowrap; }
+        #kbd-help .kbd-hint { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.75rem; }
+        kbd {
+            display: inline-block;
+            background: var(--primary);
+            border: 1px solid var(--text-muted);
+            border-radius: 3px;
+            padding: 0.1rem 0.4rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
     </style>
 </head>
 <body>
@@ -306,8 +372,9 @@
             <a href="{{ repo_url('/board') }}" {% if '/board' in request.url.path %}class="active"{% endif %}>Board</a>
             <a href="{{ repo_url('/sprints') }}" {% if '/sprints' in request.url.path %}class="active"{% endif %}>Sprints</a>
             <a href="{{ repo_url('/backlog') }}" {% if '/backlog' in request.url.path %}class="active"{% endif %}>Backlog</a>
+            <a href="{{ repo_url('/epics') }}" {% if '/epics' in request.url.path %}class="active"{% endif %}>Epics</a>
             <a href="{{ repo_url('/search') }}" {% if '/search' in request.url.path %}class="active"{% endif %}>Search</a>
-            <a href="/?picker=1" class="switch-repo" title="Switch repository">&#x21C4;</a>
+            <a href="/?picker=1" class="switch-repo" title="Switch repository" aria-label="Switch repository">&#x21C4;</a>
             {% endif %}
         </nav>
     </header>
@@ -317,5 +384,103 @@
         {% block content %}{% endblock %}
         </div>
     </main>
+
+    <div id="kbd-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"
+         onclick="if(event.target===this)this.classList.remove('visible')">
+        <div class="kbd-modal" tabindex="-1">
+            <h3>Keyboard Shortcuts</h3>
+            <table>
+                <tr><td><kbd>g</kbd> <kbd>h</kbd></td><td>Go Home</td></tr>
+                <tr><td><kbd>g</kbd> <kbd>b</kbd></td><td>Go Board</td></tr>
+                <tr><td><kbd>g</kbd> <kbd>s</kbd></td><td>Go Sprints</td></tr>
+                <tr><td><kbd>g</kbd> <kbd>l</kbd></td><td>Go Backlog</td></tr>
+                <tr><td><kbd>g</kbd> <kbd>e</kbd></td><td>Go Epics</td></tr>
+                <tr><td><kbd>/</kbd></td><td>Focus search</td></tr>
+                <tr><td><kbd>?</kbd></td><td>Toggle this help</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>Close / blur</td></tr>
+            </table>
+            <div class="kbd-hint">Press <kbd>g</kbd> then a letter within 1 second</div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var pending = null;
+        var timer = null;
+
+        // Extract /{owner}/{repo} prefix from current path
+        function repoPrefix() {
+            var m = location.pathname.match(/^\/([^\/]+)\/([^\/]+)/);
+            return m ? '/' + m[1] + '/' + m[2] : '';
+        }
+
+        function isInput(el) {
+            var tag = el.tagName;
+            return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+        }
+
+        document.addEventListener('keydown', function(e) {
+            var help = document.getElementById('kbd-help');
+
+            // Escape always works: close overlay or blur input
+            if (e.key === 'Escape') {
+                if (help.classList.contains('visible')) {
+                    help.classList.remove('visible');
+                } else if (isInput(document.activeElement)) {
+                    document.activeElement.blur();
+                }
+                return;
+            }
+
+            // Ignore shortcuts when focused on form elements
+            if (isInput(document.activeElement)) return;
+
+            // ? toggles help
+            if (e.key === '?') {
+                e.preventDefault();
+                help.classList.toggle('visible');
+                if (help.classList.contains('visible')) {
+                    help.querySelector('.kbd-modal').focus();
+                }
+                return;
+            }
+
+            // / focuses search input or navigates to search page
+            if (e.key === '/' && !pending) {
+                e.preventDefault();
+                var input = document.getElementById('search-input');
+                if (input) {
+                    input.focus();
+                    input.select();
+                } else {
+                    var prefix = repoPrefix();
+                    if (prefix) location.href = prefix + '/search';
+                }
+                return;
+            }
+
+            var prefix = repoPrefix();
+            if (!prefix) return;
+
+            // g prefix chord
+            if (e.key === 'g' && !pending) {
+                pending = 'g';
+                clearTimeout(timer);
+                timer = setTimeout(function() { pending = null; }, 1000);
+                return;
+            }
+
+            if (pending === 'g') {
+                pending = null;
+                clearTimeout(timer);
+                var routes = { h: '', b: '/board', s: '/sprints', l: '/backlog', e: '/epics' };
+                if (routes.hasOwnProperty(e.key)) {
+                    e.preventDefault();
+                    location.href = prefix + routes[e.key];
+                }
+            }
+        });
+    })();
+    </script>
 </body>
 </html>

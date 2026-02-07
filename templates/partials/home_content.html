@@ -1,0 +1,90 @@
+<div class="grid">
+    {% if current_sprint %}
+    <div class="card">
+        <div class="card-header">
+            <h2>Sprint {{ current_sprint.number }} <span class="lifecycle-indicator lifecycle-{{ current_sprint.lifecycle_state }}">{{ current_sprint.lifecycle_indicator }}</span>{% if ci_health and ci_health.state != "unknown" %}<span class="ci-indicator ci-{{ ci_health.state }}" title="CI: {{ ci_health.state }} ({{ ci_health.sha }})">{% if ci_health.state == "success" %}✓{% elif ci_health.state == "failure" %}✗{% elif ci_health.state == "running" %}⏳{% endif %}</span>{% endif %}</h2>
+            <span class="badge badge-open">Current</span>
+        </div>
+        <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="stat">
+                <div class="stat-value">{{ current_sprint.open_count }}</div>
+                <div class="stat-label">Open</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ current_sprint.closed_count }}</div>
+                <div class="stat-label">Closed</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ current_sprint.progress_pct }}%</div>
+                <div class="stat-label">Progress</div>
+            </div>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: {{ current_sprint.progress_pct }}%"></div>
+        </div>
+        {% if ci_health and ci_health.workflows %}
+        <div class="ci-pipeline" style="margin-top: 0.5rem;">
+            {% for abbrev, status, icon, url in ci_health.workflow_abbrevs %}
+            {% if url %}
+            <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="ci-step ci-{{ status }}" title="{{ abbrev }}: {{ status }} — View logs" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</a>
+            {% else %}
+            <span class="ci-step ci-{{ status }}" title="{% if status == 'not_run' %}Not run yet{% else %}{{ status }}{% endif %}" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</span>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+        <a href="{{ repo_url('/sprints/' ~ current_sprint.number) }}" style="color: var(--accent);">View details →</a>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Ready Queue</h2>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ ready_count }}</div>
+            <div class="stat-label">Issues ready for sprint</div>
+        </div>
+        <a href="{{ repo_url('/backlog') }}" style="color: var(--accent);">View backlog →</a>
+    </div>
+
+    {% if nightly_health and nightly_health.status != "unknown" %}
+    <div class="card {% if nightly_health.is_failure %}nightly-alert{% endif %}">
+        <div class="card-header">
+            <h2>Nightly Fuzz <span class="ci-indicator ci-{{ nightly_health.status }}">{{ nightly_health.icon }}</span></h2>
+            <span class="badge {% if nightly_health.is_failure %}badge-bug{% elif nightly_health.status == 'success' %}badge-closed{% else %}badge-open{% endif %}">{{ nightly_health.status }}</span>
+        </div>
+        <div class="stat">
+            <div class="stat-value ci-{{ nightly_health.status }}">{{ nightly_health.icon }}</div>
+            <div class="stat-label">Last run {{ nightly_health.time_ago }}</div>
+        </div>
+        {% if nightly_health.is_failure %}
+        <div class="nightly-crash-warning">Crashes detected — review fuzz logs</div>
+        {% endif %}
+        {% if nightly_health.url %}
+        <a href="{{ nightly_health.url }}" target="_blank" rel="noopener noreferrer" style="color: var(--accent);">View run logs →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Recent Sprints</h2>
+    </div>
+    <ul class="issue-list">
+        {% for sprint in sprints %}
+        <li class="issue-item">
+            <span class="issue-number">Sprint {{ sprint.number }} <span class="lifecycle-indicator lifecycle-{{ sprint.lifecycle_state }}">{{ sprint.lifecycle_indicator }}</span></span>
+            <span class="issue-title">{{ sprint.total }} issues</span>
+            <div class="progress-bar" style="width: 100px;">
+                <div class="progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
+            </div>
+            <span>{{ sprint.progress_pct }}%</span>
+            <a href="{{ repo_url('/sprints/' ~ sprint.number) }}" style="color: var(--accent);">View</a>
+        </li>
+        {% else %}
+        <li class="empty-state">No sprints found</li>
+        {% endfor %}
+    </ul>
+</div>

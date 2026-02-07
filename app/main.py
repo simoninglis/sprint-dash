@@ -11,9 +11,11 @@ from fastapi.templating import Jinja2Templates
 
 from .gitea import (
     BacklogStats,
+    BurndownData,
     CIHealth,
     ConfigError,
     GiteaError,
+    NightlyHealth,
     close_all_clients,
     get_base_client,
     get_client,
@@ -101,18 +103,26 @@ async def home(request: Request, owner: str, repo: str):
     with contextlib.suppress(Exception):
         ci_health = client.get_ci_health()
 
-    return templates.TemplateResponse(
-        "home.html",
-        make_context(
-            request,
-            owner,
-            repo,
-            current_sprint=current,
-            sprints=sprints[:5],
-            ready_count=len(ready_queue),
-            ci_health=ci_health,
-        ),
+    # Fetch nightly fuzz run health
+    nightly_health: NightlyHealth | None = None
+    with contextlib.suppress(Exception):
+        nightly_health = client.get_nightly_health()
+
+    context = make_context(
+        request,
+        owner,
+        repo,
+        current_sprint=current,
+        sprints=sprints[:5],
+        ready_count=len(ready_queue),
+        ci_health=ci_health,
+        nightly_health=nightly_health,
     )
+
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse("partials/home_content.html", context)
+
+    return templates.TemplateResponse("home.html", context)
 
 
 def _sort_board_issues(issues: list, show_closed: bool = False) -> list:
@@ -155,6 +165,11 @@ async def board(
     ci_health: CIHealth | None = None
     with contextlib.suppress(Exception):
         ci_health = client.get_ci_health()
+
+    # Fetch nightly fuzz run health
+    nightly_health: NightlyHealth | None = None
+    with contextlib.suppress(Exception):
+        nightly_health = client.get_nightly_health()
 
     # Apply filters to backlog
     backlog = board_data.backlog
@@ -242,6 +257,7 @@ async def board(
         all_types=all_types,
         all_epics=all_epics,
         ci_health=ci_health,
+        nightly_health=nightly_health,
     )
 
     if request.headers.get("HX-Request"):
@@ -358,7 +374,12 @@ async def sprint_detail(request: Request, owner: str, repo: str, number: int):
             "partials/error.html", {"request": request, "error": str(e)}
         )
 
-    context = make_context(request, owner, repo, sprint=sprint)
+    # Fetch burndown data (suppressed errors)
+    burndown: BurndownData | None = None
+    with contextlib.suppress(Exception):
+        burndown = client.get_burndown_data(number)
+
+    context = make_context(request, owner, repo, sprint=sprint, burndown=burndown)
 
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse("partials/sprint_detail.html", context)
@@ -459,6 +480,25 @@ async def backlog(
         return templates.TemplateResponse("partials/backlog_list.html", context)
 
     return templates.TemplateResponse("backlog.html", context)
+
+
+@app.get("/{owner}/{repo}/epics", response_class=HTMLResponse)
+async def epics(request: Request, owner: str, repo: str):
+    """Epic progress view - shows all epics with progress bars and sprint breakdowns."""
+    try:
+        client = get_client(owner, repo)
+        epic_summaries = client.get_epic_summaries()
+    except (GiteaError, ConfigError) as e:
+        return templates.TemplateResponse(
+            "partials/error.html", {"request": request, "error": str(e)}
+        )
+
+    context = make_context(request, owner, repo, epics=epic_summaries)
+
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse("partials/epics_content.html", context)
+
+    return templates.TemplateResponse("epics.html", context)
 
 
 @app.get("/{owner}/{repo}/search", response_class=HTMLResponse)

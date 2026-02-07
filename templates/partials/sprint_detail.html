@@ -24,6 +24,12 @@
     </div>
 </div>
 
+{% if burndown %}
+<div class="card">
+    {% include "partials/burndown_chart.html" %}
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-header">
         <h2>Issues</h2>

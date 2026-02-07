@@ -5,7 +5,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -63,6 +63,14 @@ _ci_health_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=60)
 
 # Separate short-lived cache for CI health failures (5s TTL) to avoid hammering API
 _ci_health_failure_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=5)
+
+# Nightly health cache (60s TTL, keyed by repo)
+_nightly_health_cache: TTLCache[str, "NightlyHealth"] = TTLCache(maxsize=10, ttl=60)
+
+# Separate short-lived cache for nightly health failures (5s TTL)
+_nightly_health_failure_cache: TTLCache[str, "NightlyHealth"] = TTLCache(
+    maxsize=10, ttl=5
+)
 
 # User repos cache (5 minute TTL - repos don't change often)
 _user_repos_cache: TTLCache[str, list[dict[str, str]]] = TTLCache(maxsize=1, ttl=300)
@@ -501,7 +509,10 @@ class CIHealth:
             state = "pending"
         elif any(s == "failure" for s in real_statuses):
             state = "failure"
-        elif any(s in ("running", "waiting", "queued", "pending", "in_progress") for s in real_statuses):
+        elif any(
+            s in ("running", "waiting", "queued", "pending", "in_progress")
+            for s in real_statuses
+        ):
             state = "running"
         elif any(s == "cancelled" for s in real_statuses):
             state = "cancelled"
@@ -519,7 +530,9 @@ class CIHealth:
         return cls(
             sha=sha,
             state=state,
-            workflows=tuple((wf, status, url) for wf, (status, url) in workflows.items()),
+            workflows=tuple(
+                (wf, status, url) for wf, (status, url) in workflows.items()
+            ),
         )
 
     @property
@@ -552,6 +565,110 @@ class CIHealth:
             (abbrev_map.get(wf, wf[:1].upper()), status, icon_map.get(status, "?"), url)
             for wf, status, url in self.workflows
         ]
+
+
+@dataclass(frozen=True)
+class NightlyHealth:
+    """Status of the most recent nightly fuzz run."""
+
+    workflow: str  # e.g. "fuzz-nightly.yml"
+    status: str  # "success", "failure", "running", "pending", "unknown"
+    started_at: str  # ISO timestamp
+    url: str  # Link to the run in Gitea
+
+    @property
+    def time_ago(self) -> str:
+        """Human-readable time since the run started."""
+        if not self.started_at:
+            return "unknown"
+        try:
+            started = datetime.fromisoformat(self.started_at.replace("Z", "+00:00"))
+            delta = datetime.now(UTC) - started
+            hours = int(delta.total_seconds() // 3600)
+            if hours < 1:
+                minutes = int(delta.total_seconds() // 60)
+                return f"{minutes}m ago"
+            if hours < 24:
+                return f"{hours}h ago"
+            days = hours // 24
+            return f"{days}d ago"
+        except (ValueError, TypeError):
+            return "unknown"
+
+    @property
+    def icon(self) -> str:
+        """Status icon for display."""
+        return {
+            "success": "✓",
+            "failure": "✗",
+            "running": "⏳",
+            "pending": "⏳",
+            "cancelled": "⊘",
+        }.get(self.status, "?")
+
+    @property
+    def is_failure(self) -> bool:
+        return self.status == "failure"
+
+
+@dataclass(frozen=True)
+class EpicSummary:
+    """Summary of an epic's progress across sprints."""
+
+    name: str
+    color: str
+    total_issues: int
+    open_issues: int
+    closed_issues: int
+    total_points: int
+    completed_points: int
+    # (sprint_num, open, closed, total_pts, done_pts)
+    sprints: tuple[tuple[int, int, int, int, int], ...]
+
+    @property
+    def progress_pct(self) -> int:
+        if self.total_issues == 0:
+            return 0
+        return int(self.closed_issues / self.total_issues * 100)
+
+    @property
+    def points_pct(self) -> int:
+        if self.total_points == 0:
+            return 0
+        return int(self.completed_points / self.total_points * 100)
+
+
+def _parse_closed_date(closed_at: str | None) -> date | None:
+    """Parse closed_at ISO timestamp to date."""
+    if not closed_at:
+        return None
+    try:
+        return datetime.fromisoformat(closed_at.replace("Z", "+00:00")).date()
+    except (ValueError, TypeError):
+        return None
+
+
+@dataclass(frozen=True)
+class BurndownPoint:
+    """A single day's data point on the burndown chart."""
+
+    day: date
+    remaining_issues: int
+    remaining_points: int
+    ideal_issues: float
+    ideal_points: float
+
+
+@dataclass(frozen=True)
+class BurndownData:
+    """Burndown chart data for a sprint."""
+
+    sprint_number: int
+    start_date: date
+    end_date: date
+    total_issues: int
+    total_points: int
+    points: tuple[BurndownPoint, ...]
 
 
 @dataclass
@@ -673,7 +790,9 @@ class GiteaClient:
             self.owner = owner if owner is not None else ""
             self.repo = repo if repo is not None else ""
         else:
-            self.owner = owner if owner is not None else os.getenv("GITEA_OWNER", "") or ""
+            self.owner = (
+                owner if owner is not None else os.getenv("GITEA_OWNER", "") or ""
+            )
             self.repo = repo if repo is not None else os.getenv("GITEA_REPO", "") or ""
 
         if not self.base_url:
@@ -1176,6 +1295,76 @@ class GiteaClient:
             _ci_health_failure_cache[cache_key] = result
             return result
 
+    def get_nightly_health(self) -> NightlyHealth:
+        """Get status of the most recent nightly fuzz run.
+
+        Returns:
+            NightlyHealth with status and link to the run.
+            On error, returns NightlyHealth with status="unknown".
+        """
+        cache_key = f"{self.base_url}:{self.owner}/{self.repo}:nightly_health"
+        if cache_key in _nightly_health_cache:
+            return _nightly_health_cache[cache_key]
+        if cache_key in _nightly_health_failure_cache:
+            return _nightly_health_failure_cache[cache_key]
+
+        unknown = NightlyHealth(
+            workflow="fuzz-nightly.yml", status="unknown", started_at="", url=""
+        )
+
+        try:
+            resp = self._client.get(
+                f"/repos/{self.owner}/{self.repo}/actions/runs",
+                params={"limit": 20},
+            )
+            resp.raise_for_status()
+            runs = resp.json().get("workflow_runs", [])
+
+            # Find the most recent fuzz-nightly run (any branch)
+            latest_run: dict | None = None
+            for run in runs:
+                path = run.get("path", "")
+                workflow_file = path.split("@")[0] if "@" in path else path
+                if "/" in workflow_file:
+                    workflow_file = workflow_file.rsplit("/", 1)[-1]
+
+                if workflow_file == "fuzz-nightly.yml" and (
+                    latest_run is None
+                    or run.get("run_number", 0) > latest_run.get("run_number", 0)
+                ):
+                    latest_run = run
+
+            if latest_run is None:
+                _nightly_health_failure_cache[cache_key] = unknown
+                return unknown
+
+            # Derive status
+            status = (latest_run.get("status") or "").lower()
+            if status == "completed":
+                status = (latest_run.get("conclusion") or "unknown").lower()
+
+            # Validate URL
+            url = latest_run.get("html_url") or ""
+            if url and url.startswith("/"):
+                base = (self.base_url or "").rstrip("/")
+                url = f"{base}{url}"
+            elif url and not url.startswith(("https://", "http://")):
+                url = ""
+
+            result = NightlyHealth(
+                workflow="fuzz-nightly.yml",
+                status=status,
+                started_at=latest_run.get("started_at", ""),
+                url=url,
+            )
+            _nightly_health_cache[cache_key] = result
+            return result
+
+        except (httpx.HTTPStatusError, httpx.RequestError) as e:
+            logger.warning(f"Failed to fetch nightly health: {e}")
+            _nightly_health_failure_cache[cache_key] = unknown
+            return unknown
+
     def get_user_repos(self) -> list[dict[str, str]]:
         """Fetch repositories accessible to the authenticated user.
 
@@ -1288,6 +1477,145 @@ class GiteaClient:
             backlog=backlog,
             sprints=sprints,
             current_sprint_num=current_num,
+        )
+
+    def get_epic_summaries(self) -> list[EpicSummary]:
+        """Get progress summaries for all epics.
+
+        Groups issues by epic label, then by sprint within each epic.
+        Reuses cached _get_issues(state="all") — no new API calls.
+
+        Returns:
+            List of EpicSummary sorted by total issues descending.
+        """
+        all_issues = self._get_issues(state="all")
+
+        # Group by epic
+        epic_issues: dict[str, list[Issue]] = {}
+        for issue in all_issues:
+            if issue.epic:
+                epic_issues.setdefault(issue.epic, []).append(issue)
+
+        summaries: list[EpicSummary] = []
+        for epic_name, issues in epic_issues.items():
+            open_count = sum(1 for i in issues if i.state == "open")
+            closed_count = sum(1 for i in issues if i.state == "closed")
+            total_points = sum(i.points for i in issues)
+            completed_points = sum(i.points for i in issues if i.state == "closed")
+
+            # Group by sprint within this epic
+            sprint_map: dict[int, list[Issue]] = {}
+            for issue in issues:
+                if issue.sprint is not None:
+                    sprint_map.setdefault(issue.sprint, []).append(issue)
+
+            sprint_tuples: list[tuple[int, int, int, int, int]] = []
+            for sprint_num in sorted(sprint_map.keys()):
+                s_issues = sprint_map[sprint_num]
+                s_open = sum(1 for i in s_issues if i.state == "open")
+                s_closed = sum(1 for i in s_issues if i.state == "closed")
+                s_total_pts = sum(i.points for i in s_issues)
+                s_done_pts = sum(i.points for i in s_issues if i.state == "closed")
+                sprint_tuples.append(
+                    (sprint_num, s_open, s_closed, s_total_pts, s_done_pts)
+                )
+
+            summaries.append(
+                EpicSummary(
+                    name=epic_name,
+                    color=get_epic_color(epic_name),
+                    total_issues=len(issues),
+                    open_issues=open_count,
+                    closed_issues=closed_count,
+                    total_points=total_points,
+                    completed_points=completed_points,
+                    sprints=tuple(sprint_tuples),
+                )
+            )
+
+        # Sort by total issues descending
+        summaries.sort(key=lambda s: -s.total_issues)
+        return summaries
+
+    def get_burndown_data(self, sprint_number: int) -> BurndownData | None:
+        """Get burndown chart data for a sprint.
+
+        Requires a milestone with start_date in its description.
+        Sprint duration is 14 days (start + 13 days inclusive).
+
+        Returns:
+            BurndownData with daily points, or None if no start_date.
+        """
+        # Find milestone for this sprint to get start_date
+        milestones = self.get_milestones(state="all")
+        milestone = None
+        for m in milestones:
+            if m.sprint_number == sprint_number:
+                milestone = m
+                break
+
+        if milestone is None or milestone.start_date is None:
+            return None
+
+        start = milestone.start_date
+        end = start + timedelta(days=13)  # 14-day sprint
+        today = date.today()
+        chart_end = min(today, end)
+
+        # Get sprint issues
+        issues = self._get_issues(labels=f"sprint/{sprint_number}")
+        total_issues = len(issues)
+        total_points = sum(i.points for i in issues)
+
+        if total_issues == 0:
+            return None
+
+        # Sprint hasn't started yet — no data to chart
+        if today < start:
+            return None
+
+        # Pre-compute closed dates
+        closed_dates: list[tuple[date, int]] = []
+        for issue in issues:
+            closed_date = _parse_closed_date(issue.closed_at)
+            if closed_date is not None:
+                closed_dates.append((closed_date, issue.points))
+
+        # Build daily points
+        sprint_days = (end - start).days + 1  # 14
+        points_list: list[BurndownPoint] = []
+        current = start
+        while current <= chart_end:
+            day_index = (current - start).days
+            # Count issues and points closed by this day
+            closed_by_day = sum(1 for d, _ in closed_dates if d <= current)
+            closed_pts_by_day = sum(pts for d, pts in closed_dates if d <= current)
+
+            remaining_issues = total_issues - closed_by_day
+            remaining_points = total_points - closed_pts_by_day
+
+            # Ideal: linear from total to 0 over sprint duration
+            ideal_issues = total_issues * (1 - day_index / (sprint_days - 1))
+            ideal_points = total_points * (1 - day_index / (sprint_days - 1))
+
+            points_list.append(
+                BurndownPoint(
+                    day=current,
+                    remaining_issues=remaining_issues,
+                    remaining_points=remaining_points,
+                    ideal_issues=round(ideal_issues, 1),
+                    ideal_points=round(ideal_points, 1),
+                )
+            )
+            current += timedelta(days=1)
+
+        return BurndownData(
+            sprint_number=sprint_number,
+            start_date=start,
+            end_date=end,
+            total_issues=total_issues,
+            total_points=total_points,
+            points=tuple(points_list),
         )
 
 

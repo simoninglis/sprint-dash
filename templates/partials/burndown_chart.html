@@ -1,0 +1,93 @@
+{# Burndown chart - server-rendered SVG #}
+{# Expects: burndown (BurndownData) in context #}
+{% set w = 600 %}
+{% set h = 300 %}
+{% set pad_l = 50 %}
+{% set pad_r = 20 %}
+{% set pad_t = 30 %}
+{% set pad_b = 50 %}
+{% set chart_w = w - pad_l - pad_r %}
+{% set chart_h = h - pad_t - pad_b %}
+{% set max_val = burndown.total_issues %}
+{% set num_points = burndown.points | length %}
+
+<h3 style="margin-bottom: 0.5rem;">Burndown</h3>
+<svg viewBox="0 0 {{ w }} {{ h }}" style="width: 100%; max-width: 600px; height: auto;"
+     xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Burndown chart for sprint {{ burndown.sprint_number }}: {{ burndown.total_issues }} issues over {{ burndown.points | length }} days">
+    <title>Sprint {{ burndown.sprint_number }} Burndown Chart</title>
+
+    {# Background #}
+    <rect x="{{ pad_l }}" y="{{ pad_t }}" width="{{ chart_w }}" height="{{ chart_h }}"
+          fill="var(--bg)" rx="2"/>
+
+    {# Grid lines - horizontal #}
+    {% if max_val > 0 %}
+    {% set steps = 4 %}
+    {% for i in range(steps + 1) %}
+        {% set y_pos = pad_t + (chart_h * i // steps) %}
+        {% set label_val = max_val - (max_val * i // steps) %}
+        <line x1="{{ pad_l }}" y1="{{ y_pos }}" x2="{{ w - pad_r }}" y2="{{ y_pos }}"
+              stroke="var(--primary)" stroke-width="1"/>
+        <text x="{{ pad_l - 8 }}" y="{{ y_pos + 4 }}" text-anchor="end"
+              fill="var(--text-muted)" font-size="11">{{ label_val }}</text>
+    {% endfor %}
+    {% endif %}
+
+    {# X-axis date labels (every 3rd day) #}
+    {% if num_points > 1 %}
+    {% for point in burndown.points %}
+        {% set idx = loop.index0 %}
+        {% if idx % 3 == 0 or idx == num_points - 1 %}
+            {% set x_pos = pad_l + (chart_w * idx // (num_points - 1)) %}
+            <text x="{{ x_pos }}" y="{{ h - pad_b + 18 }}" text-anchor="middle"
+                  fill="var(--text-muted)" font-size="10">{{ point.day.strftime('%b %d') }}</text>
+        {% endif %}
+    {% endfor %}
+    {% endif %}
+
+    {# Ideal line (dashed) #}
+    {% if num_points > 1 and max_val > 0 %}
+    <polyline fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-dasharray="6,4"
+              points="{% for point in burndown.points %}{% set idx = loop.index0 %}{% set x = pad_l + (chart_w * idx // (num_points - 1)) %}{% set y = pad_t + chart_h - (chart_h * point.ideal_issues / max_val) | round | int %}{{ x }},{{ y }} {% endfor %}"/>
+    {% endif %}
+
+    {# Actual line (solid) #}
+    {% if num_points > 1 and max_val > 0 %}
+    <polyline fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"
+              points="{% for point in burndown.points %}{% set idx = loop.index0 %}{% set x = pad_l + (chart_w * idx // (num_points - 1)) %}{% set y = pad_t + chart_h - (chart_h * point.remaining_issues // max_val) %}{{ x }},{{ y }} {% endfor %}"/>
+
+    {# Data points #}
+    {% for point in burndown.points %}
+        {% set idx = loop.index0 %}
+        {% set x = pad_l + (chart_w * idx // (num_points - 1)) %}
+        {% set y = pad_t + chart_h - (chart_h * point.remaining_issues // max_val) %}
+        <circle cx="{{ x }}" cy="{{ y }}" r="3" fill="var(--accent)"/>
+    {% endfor %}
+    {% endif %}
+
+    {# "Today" marker for in-progress sprints #}
+    {% if num_points > 1 %}
+        {% set today = burndown.points[-1].day %}
+        {% if today < burndown.end_date %}
+            {% set today_x = pad_l + chart_w %}
+            <line x1="{{ today_x }}" y1="{{ pad_t }}" x2="{{ today_x }}" y2="{{ pad_t + chart_h }}"
+                  stroke="var(--warning)" stroke-width="1" stroke-dasharray="4,3" opacity="0.6"/>
+            <text x="{{ today_x }}" y="{{ pad_t - 8 }}" text-anchor="middle"
+                  fill="var(--warning)" font-size="10">Today</text>
+        {% endif %}
+    {% endif %}
+
+    {# Legend #}
+    <line x1="{{ pad_l + 10 }}" y1="{{ pad_t + 12 }}" x2="{{ pad_l + 30 }}" y2="{{ pad_t + 12 }}"
+          stroke="var(--accent)" stroke-width="2.5"/>
+    <text x="{{ pad_l + 34 }}" y="{{ pad_t + 16 }}" fill="var(--text)" font-size="11">Actual</text>
+
+    <line x1="{{ pad_l + 85 }}" y1="{{ pad_t + 12 }}" x2="{{ pad_l + 105 }}" y2="{{ pad_t + 12 }}"
+          stroke="var(--text-muted)" stroke-width="1.5" stroke-dasharray="6,4"/>
+    <text x="{{ pad_l + 109 }}" y="{{ pad_t + 16 }}" fill="var(--text)" font-size="11">Ideal</text>
+
+    {# Y-axis label #}
+    <text x="14" y="{{ pad_t + chart_h / 2 }}" text-anchor="middle" fill="var(--text-muted)"
+          font-size="11" transform="rotate(-90, 14, {{ pad_t + chart_h / 2 }})">Issues</text>
+</svg>

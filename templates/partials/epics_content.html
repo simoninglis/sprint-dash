@@ -1,0 +1,66 @@
+{% if not epics %}
+<div class="empty-state">
+    <p>No epics found. Add <code>epic/name</code> labels to issues to see them here.</p>
+</div>
+{% else %}
+{% for epic in epics %}
+<div class="card" style="border-left: 3px solid {{ epic.color }};">
+    <div class="card-header">
+        <div>
+            <h2 style="color: {{ epic.color }}; margin: 0;">{{ epic.name }}</h2>
+            <span style="color: var(--text-muted); font-size: 0.85rem;">
+                {{ epic.closed_issues }}/{{ epic.total_issues }} issues
+                {% if epic.total_points %} &middot; {{ epic.completed_points }}/{{ epic.total_points }} pts{% endif %}
+            </span>
+        </div>
+        <div style="text-align: right;">
+            <span class="stat-value" style="font-size: 1.5rem;">{{ epic.progress_pct }}%</span>
+            <div>
+                <a href="{{ repo_url('/board') }}?epic_filter={{ epic.name | urlencode }}"
+                   style="color: var(--text-muted); font-size: 0.8rem; text-decoration: none;">
+                    View on board &rarr;
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="progress-bar">
+        <div class="progress-fill" style="width: {{ epic.progress_pct }}%; background: {{ epic.color }};"></div>
+    </div>
+
+    {% if epic.sprints %}
+    <table style="width: 100%; margin-top: 0.75rem; font-size: 0.85rem; border-collapse: collapse;">
+        <thead>
+            <tr style="color: var(--text-muted);">
+                <td style="padding: 0.3rem 0.5rem;">Sprint</td>
+                <td style="padding: 0.3rem 0.5rem;">Issues</td>
+                <td style="padding: 0.3rem 0.5rem;">Points</td>
+                <td style="padding: 0.3rem 0.5rem; width: 40%;">Progress</td>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sprint_num, s_open, s_closed, s_total_pts, s_done_pts in epic.sprints %}
+            {% set s_total = s_open + s_closed %}
+            {% set s_pct = (s_closed * 100 // s_total) if s_total > 0 else 0 %}
+            <tr style="border-top: 1px solid var(--primary);">
+                <td style="padding: 0.3rem 0.5rem;">
+                    <a href="{{ repo_url('/sprints/' ~ sprint_num) }}" style="color: var(--text); text-decoration: none;">
+                        S{{ sprint_num }}
+                    </a>
+                </td>
+                <td style="padding: 0.3rem 0.5rem;">{{ s_closed }}/{{ s_total }}</td>
+                <td style="padding: 0.3rem 0.5rem;">
+                    {% if s_total_pts %}{{ s_done_pts }}/{{ s_total_pts }}{% else %}&mdash;{% endif %}
+                </td>
+                <td style="padding: 0.3rem 0.5rem;">
+                    <div class="progress-bar" style="height: 6px;">
+                        <div class="progress-fill" style="width: {{ s_pct }}%; background: {{ epic.color }};"></div>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endfor %}
+{% endif %}
