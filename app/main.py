@@ -15,7 +15,7 @@ from .gitea import (
     CIHealth,
     ConfigError,
     GiteaError,
-    NightlyHealth,
+    NightlySummary,
     close_all_clients,
     get_base_client,
     get_client,
@@ -103,10 +103,10 @@ async def home(request: Request, owner: str, repo: str):
     with contextlib.suppress(Exception):
         ci_health = client.get_ci_health()
 
-    # Fetch nightly fuzz run health
-    nightly_health: NightlyHealth | None = None
+    # Fetch nightly workflow summary
+    nightly: NightlySummary | None = None
     with contextlib.suppress(Exception):
-        nightly_health = client.get_nightly_health()
+        nightly = client.get_nightly_summary()
 
     context = make_context(
         request,
@@ -116,7 +116,7 @@ async def home(request: Request, owner: str, repo: str):
         sprints=sprints[:5],
         ready_count=len(ready_queue),
         ci_health=ci_health,
-        nightly_health=nightly_health,
+        nightly=nightly,
     )
 
     if request.headers.get("HX-Request"):
@@ -166,10 +166,10 @@ async def board(
     with contextlib.suppress(Exception):
         ci_health = client.get_ci_health()
 
-    # Fetch nightly fuzz run health
-    nightly_health: NightlyHealth | None = None
+    # Fetch nightly workflow summary
+    nightly: NightlySummary | None = None
     with contextlib.suppress(Exception):
-        nightly_health = client.get_nightly_health()
+        nightly = client.get_nightly_summary()
 
     # Apply filters to backlog
     backlog = board_data.backlog
@@ -257,7 +257,7 @@ async def board(
         all_types=all_types,
         all_epics=all_epics,
         ci_health=ci_health,
-        nightly_health=nightly_health,
+        nightly=nightly,
     )
 
     if request.headers.get("HX-Request"):

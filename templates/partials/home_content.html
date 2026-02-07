@@ -48,22 +48,31 @@
         <a href="{{ repo_url('/backlog') }}" style="color: var(--accent);">View backlog →</a>
     </div>
 
-    {% if nightly_health and nightly_health.status != "unknown" %}
-    <div class="card {% if nightly_health.is_failure %}nightly-alert{% endif %}">
+    {% if nightly and nightly.has_known %}
+    <div class="card {% if nightly.has_failure %}nightly-alert{% endif %}">
         <div class="card-header">
-            <h2>Nightly Fuzz <span class="ci-indicator ci-{{ nightly_health.status }}">{{ nightly_health.icon }}</span></h2>
-            <span class="badge {% if nightly_health.is_failure %}badge-bug{% elif nightly_health.status == 'success' %}badge-closed{% else %}badge-open{% endif %}">{{ nightly_health.status }}</span>
+            <h2>Nightly <span class="ci-indicator ci-{{ nightly.state }}">{{ nightly.icon }}</span></h2>
+            <span class="badge {% if nightly.has_failure %}badge-bug{% elif nightly.state == 'success' %}badge-closed{% elif nightly.state in ('cancelled', 'skipped', 'unknown') %}badge-chore{% else %}badge-open{% endif %}">{{ nightly.state }}</span>
         </div>
-        <div class="stat">
-            <div class="stat-value ci-{{ nightly_health.status }}">{{ nightly_health.icon }}</div>
-            <div class="stat-label">Last run {{ nightly_health.time_ago }}</div>
-        </div>
-        {% if nightly_health.is_failure %}
-        <div class="nightly-crash-warning">Crashes detected — review fuzz logs</div>
-        {% endif %}
-        {% if nightly_health.url %}
-        <a href="{{ nightly_health.url }}" target="_blank" rel="noopener noreferrer" style="color: var(--accent);">View run logs →</a>
-        {% endif %}
+        <table class="nightly-table">
+            {% for wf in nightly.known_workflows %}
+            <tr class="nightly-row">
+                <td class="nightly-name">{{ wf.display_name }}</td>
+                <td class="ci-{{ wf.status }}">{{ wf.icon }}</td>
+                <td class="nightly-time">{{ wf.time_ago }}</td>
+                <td>
+                    {% if wf.url %}
+                    <a href="{{ wf.url }}" target="_blank" rel="noopener noreferrer" style="color: var(--accent);" aria-label="{{ wf.display_name }} logs">logs →</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% if wf.is_failure %}
+            <tr class="nightly-warning-row">
+                <td colspan="4" class="nightly-crash-warning">{{ wf.warning_text }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </table>
     </div>
     {% endif %}
 </div>

@@ -47,6 +47,13 @@ PIPELINE_WORKFLOWS: tuple[str, ...] = (
     "staging-verify.yml",
 )
 
+# Nightly workflows to track (abbrev, file, display_name, warning_text)
+NIGHTLY_WORKFLOWS: tuple[tuple[str, str, str, str], ...] = (
+    ("F", "nightly-fuzz.yml", "Fuzz", "Crashes detected — review fuzz logs"),
+    ("P", "nightly-perf.yml", "Perf", "Regression detected — review perf logs"),
+    ("Q", "nightly-quality.yml", "Quality", "Issues found — review quality logs"),
+)
+
 # Cache for dependency counts (repo:issue_number -> (blocked_by_count, blocks_count, blockers_list))
 _deps_cache: TTLCache[
     str, tuple[int, int, list[tuple[int, str, int | None]]]
@@ -64,13 +71,12 @@ _ci_health_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=60)
 # Separate short-lived cache for CI health failures (5s TTL) to avoid hammering API
 _ci_health_failure_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=5)
 
-# Nightly health cache (60s TTL, keyed by repo)
-_nightly_health_cache: TTLCache[str, "NightlyHealth"] = TTLCache(maxsize=10, ttl=60)
+# Nightly summary cache (60s TTL, keyed by repo)
+_nightly_cache: TTLCache[str, "NightlySummary"] = TTLCache(maxsize=10, ttl=60)
 
-# Separate short-lived cache for nightly health failures (5s TTL)
-_nightly_health_failure_cache: TTLCache[str, "NightlyHealth"] = TTLCache(
-    maxsize=10, ttl=5
-)
+# Separate short-lived cache for nightly failures (5s TTL)
+# Stores None on API error to distinguish from "no runs found"
+_nightly_failure_cache: TTLCache[str, None] = TTLCache(maxsize=10, ttl=5)
 
 # User repos cache (5 minute TTL - repos don't change often)
 _user_repos_cache: TTLCache[str, list[dict[str, str]]] = TTLCache(maxsize=1, ttl=300)
@@ -569,12 +575,36 @@ class CIHealth:
 
 @dataclass(frozen=True)
 class NightlyHealth:
-    """Status of the most recent nightly fuzz run."""
+    """Status of the most recent run for a single nightly workflow."""
 
-    workflow: str  # e.g. "fuzz-nightly.yml"
-    status: str  # "success", "failure", "running", "pending", "unknown"
+    workflow: str  # e.g. "nightly-fuzz.yml"
+    status: str  # "success", "failure", "running", "pending", "unknown", "not_run"
     started_at: str  # ISO timestamp
     url: str  # Link to the run in Gitea
+
+    @property
+    def abbrev(self) -> str:
+        """Short abbreviation for compact display."""
+        for ab, wf, _dn, _wt in NIGHTLY_WORKFLOWS:
+            if wf == self.workflow:
+                return ab
+        return self.workflow[:1].upper()
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable name for the workflow."""
+        for _ab, wf, dn, _wt in NIGHTLY_WORKFLOWS:
+            if wf == self.workflow:
+                return dn
+        return self.workflow
+
+    @property
+    def warning_text(self) -> str:
+        """Failure warning message for this workflow."""
+        for _ab, wf, _dn, wt in NIGHTLY_WORKFLOWS:
+            if wf == self.workflow:
+                return wt
+        return "Failure detected — review logs"
 
     @property
     def time_ago(self) -> str:
@@ -584,9 +614,12 @@ class NightlyHealth:
         try:
             started = datetime.fromisoformat(self.started_at.replace("Z", "+00:00"))
             delta = datetime.now(UTC) - started
-            hours = int(delta.total_seconds() // 3600)
+            total_seconds = delta.total_seconds()
+            if total_seconds < 0:
+                return "just now"
+            hours = int(total_seconds // 3600)
             if hours < 1:
-                minutes = int(delta.total_seconds() // 60)
+                minutes = int(total_seconds // 60)
                 return f"{minutes}m ago"
             if hours < 24:
                 return f"{hours}h ago"
@@ -602,13 +635,109 @@ class NightlyHealth:
             "success": "✓",
             "failure": "✗",
             "running": "⏳",
+            "in_progress": "⏳",
+            "waiting": "⏳",
+            "queued": "⏳",
             "pending": "⏳",
             "cancelled": "⊘",
+            "skipped": "–",
+            "neutral": "○",
+            "not_run": "·",
         }.get(self.status, "?")
 
     @property
     def is_failure(self) -> bool:
         return self.status == "failure"
+
+    @property
+    def is_known(self) -> bool:
+        """True if this workflow has actually run (not a placeholder)."""
+        return self.status != "not_run"
+
+
+@dataclass(frozen=True)
+class NightlySummary:
+    """Composite status across all nightly workflows."""
+
+    workflows: tuple[NightlyHealth, ...]
+
+    @classmethod
+    def from_runs(cls, run_map: dict[str, NightlyHealth]) -> "NightlySummary":
+        """Build NightlySummary from a dict of workflow_file -> NightlyHealth."""
+        ordered: list[NightlyHealth] = []
+        for _ab, wf, _dn, _wt in NIGHTLY_WORKFLOWS:
+            if wf in run_map:
+                ordered.append(run_map[wf])
+            else:
+                ordered.append(
+                    NightlyHealth(workflow=wf, status="not_run", started_at="", url="")
+                )
+        return cls(workflows=tuple(ordered))
+
+    @property
+    def known_workflows(self) -> tuple[NightlyHealth, ...]:
+        """Workflows that have actually run."""
+        return tuple(w for w in self.workflows if w.is_known)
+
+    @property
+    def state(self) -> str:
+        """Overall state across all nightly workflows.
+
+        Uses CIHealth-style priority: failure > running > cancelled > success.
+        Returns "pending" when no workflows have run yet.
+        """
+        known = self.known_workflows
+        if not known:
+            return "pending"
+        statuses = [w.status for w in known]
+        if any(s == "failure" for s in statuses):
+            return "failure"
+        if any(
+            s in ("running", "waiting", "queued", "pending", "in_progress")
+            for s in statuses
+        ):
+            return "running"
+        if any(s == "cancelled" for s in statuses):
+            return "cancelled"
+        if all(s == "success" for s in statuses):
+            return "success"
+        if all(s in ("skipped", "neutral") for s in statuses):
+            return "skipped"
+        if all(s in ("success", "skipped", "neutral") for s in statuses):
+            return "success"
+        return "pending"
+
+    @property
+    def has_failure(self) -> bool:
+        return any(w.is_failure for w in self.workflows)
+
+    @property
+    def icon(self) -> str:
+        return {
+            "success": "✓",
+            "failure": "✗",
+            "running": "⏳",
+            "pending": "⏳",
+            "cancelled": "⊘",
+            "skipped": "–",
+            "unknown": "?",
+        }.get(self.state, "?")
+
+    @property
+    def workflow_abbrevs(self) -> list[tuple[str, str, str, str]]:
+        """Get workflow abbreviations with status for compact display.
+
+        Returns list of (abbrev, status, icon, url) tuples.
+        """
+        return [
+            (w.abbrev, w.status, w.icon, w.url)
+            for w in self.workflows
+        ]
+
+    @property
+    def has_known(self) -> bool:
+        """True if at least one workflow has run."""
+        return len(self.known_workflows) > 0
 
 
 @dataclass(frozen=True)
@@ -1295,75 +1424,82 @@ class GiteaClient:
             _ci_health_failure_cache[cache_key] = result
             return result
 
-    def get_nightly_health(self) -> NightlyHealth:
-        """Get status of the most recent nightly fuzz run.
+    def get_nightly_summary(self) -> NightlySummary | None:
+        """Get status of all nightly workflow runs.
+
+        Searches for all workflows in NIGHTLY_WORKFLOWS in a single API call.
 
         Returns:
-            NightlyHealth with status and link to the run.
-            On error, returns NightlyHealth with status="unknown".
+            NightlySummary with per-workflow status, or None on API error.
         """
-        cache_key = f"{self.base_url}:{self.owner}/{self.repo}:nightly_health"
-        if cache_key in _nightly_health_cache:
-            return _nightly_health_cache[cache_key]
-        if cache_key in _nightly_health_failure_cache:
-            return _nightly_health_failure_cache[cache_key]
+        cache_key = f"{self.base_url}:{self.owner}/{self.repo}:nightly"
+        if cache_key in _nightly_cache:
+            return _nightly_cache[cache_key]
+        if cache_key in _nightly_failure_cache:
+            return _nightly_failure_cache[cache_key]
 
-        unknown = NightlyHealth(
-            workflow="fuzz-nightly.yml", status="unknown", started_at="", url=""
-        )
+        nightly_files = {wf for _ab, wf, _dn, _wt in NIGHTLY_WORKFLOWS}
+        unknown = NightlySummary.from_runs({})
 
         try:
             resp = self._client.get(
                 f"/repos/{self.owner}/{self.repo}/actions/runs",
-                params={"limit": 20},
+                params={"limit": PAGE_LIMIT},
             )
             resp.raise_for_status()
             runs = resp.json().get("workflow_runs", [])
 
-            # Find the most recent fuzz-nightly run (any branch)
-            latest_run: dict | None = None
+            # Find the most recent run for each nightly workflow (any branch)
+            latest_runs: dict[str, dict] = {}
             for run in runs:
                 path = run.get("path", "")
                 workflow_file = path.split("@")[0] if "@" in path else path
                 if "/" in workflow_file:
                     workflow_file = workflow_file.rsplit("/", 1)[-1]
 
-                if workflow_file == "fuzz-nightly.yml" and (
-                    latest_run is None
-                    or run.get("run_number", 0) > latest_run.get("run_number", 0)
-                ):
-                    latest_run = run
+                if workflow_file not in nightly_files:
+                    continue
 
-            if latest_run is None:
-                _nightly_health_failure_cache[cache_key] = unknown
+                if workflow_file not in latest_runs or run.get(
+                    "run_number", 0
+                ) > latest_runs[workflow_file].get("run_number", 0):
+                    latest_runs[workflow_file] = run
+
+            if not latest_runs:
+                # No nightly runs found — cache normally (not a failure, just no runs)
+                _nightly_cache[cache_key] = unknown
                 return unknown
 
-            # Derive status
-            status = (latest_run.get("status") or "").lower()
-            if status == "completed":
-                status = (latest_run.get("conclusion") or "unknown").lower()
+            # Build per-workflow NightlyHealth
+            run_map: dict[str, NightlyHealth] = {}
+            for wf_file, run in latest_runs.items():
+                status = (run.get("status") or "").lower()
+                if status == "completed":
+                    status = (run.get("conclusion") or "unknown").lower()
 
-            # Validate URL
-            url = latest_run.get("html_url") or ""
-            if url and url.startswith("/"):
-                base = (self.base_url or "").rstrip("/")
-                url = f"{base}{url}"
-            elif url and not url.startswith(("https://", "http://")):
-                url = ""
+                url = run.get("html_url") or ""
+                if url and url.startswith("/"):
+                    base = (self.base_url or "").rstrip("/")
+                    url = f"{base}{url}"
+                elif url and not url.startswith(("https://", "http://")):
+                    url = ""
 
-            result = NightlyHealth(
-                workflow="fuzz-nightly.yml",
-                status=status,
-                started_at=latest_run.get("started_at", ""),
-                url=url,
-            )
-            _nightly_health_cache[cache_key] = result
+                run_map[wf_file] = NightlyHealth(
+                    workflow=wf_file,
+                    status=status,
+                    started_at=run.get("started_at", ""),
+                    url=url,
+                )
+
+            result = NightlySummary.from_runs(run_map)
+            _nightly_cache[cache_key] = result
             return result
 
         except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            logger.warning(f"Failed to fetch nightly health: {e}")
-            _nightly_health_failure_cache[cache_key] = unknown
-            return unknown
+            logger.warning(f"Failed to fetch nightly summary: {e}")
+            # Cache None briefly to rate-limit during outages
+            _nightly_failure_cache[cache_key] = None
+            return None
 
     def get_user_repos(self) -> list[dict[str, str]]:
         """Fetch repositories accessible to the authenticated user.

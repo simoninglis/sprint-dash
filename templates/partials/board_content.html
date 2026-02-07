@@ -141,15 +141,17 @@
                     {% endif %}
                     {% endfor %}
                     {% endif %}
-                    {% if nightly_health and nightly_health.status != "unknown" %}
+                    {% if nightly %}
                     {% if ci_health and ci_health.workflows %}<span class="ci-step-separator">|</span>{% endif %}
-                    {% if nightly_health.url %}
-                    <a href="{{ nightly_health.url }}" target="_blank" rel="noopener noreferrer" class="ci-step ci-{{ nightly_health.status }}" title="Nightly fuzz: {{ nightly_health.status }} ({{ nightly_health.time_ago }}) — View logs" aria-label="Nightly fuzz: {{ nightly_health.status }}">N:{{ nightly_health.icon }}</a>
+                    {% for abbrev, status, icon, url in nightly.workflow_abbrevs %}
+                    {% if url %}
+                    <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="ci-step ci-{{ status }}" title="Nightly {{ abbrev }}: {{ status }} — View logs" aria-label="Nightly {{ abbrev }}: {{ status }}">{{ abbrev }}:{{ icon }}</a>
                     {% else %}
-                    <span class="ci-step ci-{{ nightly_health.status }}" title="Nightly fuzz: {{ nightly_health.status }} ({{ nightly_health.time_ago }})" aria-label="Nightly fuzz: {{ nightly_health.status }}">N:{{ nightly_health.icon }}</span>
+                    <span class="ci-step ci-{{ status }}" title="{% if status == 'not_run' %}Not run yet{% else %}Nightly {{ abbrev }}: {{ status }}{% endif %}" aria-label="Nightly {{ abbrev }}: {{ status }}">{{ abbrev }}:{{ icon }}</span>
                     {% endif %}
+                    {% endfor %}
                     {% endif %}
-                    {% if not (ci_health and ci_health.workflows) and not (nightly_health and nightly_health.status != "unknown") %}
+                    {% if not (ci_health and ci_health.workflows) and not nightly %}
                     &nbsp;
                     {% endif %}
                 {% else %}

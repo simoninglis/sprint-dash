@@ -310,6 +310,39 @@
             padding: 0.5rem 0;
         }
 
+        .nightly-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        .nightly-row td {
+            padding: 0.4rem 0.5rem;
+            border-bottom: 1px solid var(--primary);
+        }
+
+        .nightly-row:last-child td,
+        .nightly-warning-row + .nightly-row td {
+            border-bottom: 1px solid var(--primary);
+        }
+
+        .nightly-row:last-of-type td {
+            border-bottom: none;
+        }
+
+        .nightly-name {
+            font-weight: 600;
+        }
+
+        .nightly-time {
+            color: var(--text-muted);
+        }
+
+        .nightly-warning-row td {
+            padding: 0.25rem 0.5rem 0.5rem;
+            border-bottom: 1px solid var(--primary);
+        }
+
         .sr-only {
             position: absolute;
             width: 1px;
