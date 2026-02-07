@@ -7,7 +7,11 @@
 <div class="card" style="border-left: 3px solid {{ epic.color }};">
     <div class="card-header">
         <div>
-            <h2 style="color: {{ epic.color }}; margin: 0;">{{ epic.name }}</h2>
+            <h2 style="color: {{ epic.color }}; margin: 0;">{{ epic.name }}
+                {% if epic.tracking_issue_number %}<a href="{{ repo_url('/issues/' ~ epic.tracking_issue_number) }}"
+                   style="color: var(--text-muted); font-size: 0.8rem; text-decoration: none; margin-left: 0.5rem; vertical-align: middle;"
+                   title="Epic tracking issue">#{{ epic.tracking_issue_number }}</a>{% endif %}
+            </h2>
             <span style="color: var(--text-muted); font-size: 0.85rem;">
                 {{ epic.closed_issues }}/{{ epic.total_issues }} issues
                 {% if epic.total_points %} &middot; {{ epic.completed_points }}/{{ epic.total_points }} pts{% endif %}

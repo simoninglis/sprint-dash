@@ -333,7 +333,7 @@ class Issue:
     def issue_type(self) -> str:
         """Infer issue type from labels."""
         for label in self.labels:
-            if label in ("bug", "feature", "tech-debt", "chore", "docs", "hotfix"):
+            if label in ("bug", "feature", "tech-debt", "chore", "docs", "hotfix", "epic"):
                 return label
         return "unknown"
 
@@ -373,6 +373,16 @@ class Issue:
             if match := re.match(r"P([1-3])$", label):
                 return int(match.group(1))
         return None
+
+    @property
+    def is_epic_tracking(self) -> bool:
+        """True if this is an epic tracking issue.
+
+        Convention: the 'epic' label is reserved for the single tracking
+        issue per epic (alongside the 'epic/name' label). Work items only
+        carry 'epic/name', never the bare 'epic' label.
+        """
+        return "epic" in self.labels
 
     @property
     def epic(self) -> str | None:
@@ -753,6 +763,7 @@ class EpicSummary:
     completed_points: int
     # (sprint_num, open, closed, total_pts, done_pts)
     sprints: tuple[tuple[int, int, int, int, int], ...]
+    tracking_issue_number: int | None = None
 
     @property
     def progress_pct(self) -> int:
@@ -1634,14 +1645,34 @@ class GiteaClient:
 
         summaries: list[EpicSummary] = []
         for epic_name, issues in epic_issues.items():
-            open_count = sum(1 for i in issues if i.state == "open")
-            closed_count = sum(1 for i in issues if i.state == "closed")
-            total_points = sum(i.points for i in issues)
-            completed_points = sum(i.points for i in issues if i.state == "closed")
-
-            # Group by sprint within this epic
-            sprint_map: dict[int, list[Issue]] = {}
+            # Find and exclude the epic tracking issue from counts
+            tracking_number: int | None = None
+            work_issues: list[Issue] = []
             for issue in issues:
+                if issue.is_epic_tracking:
+                    if tracking_number is not None:
+                        logger.warning(
+                            "Epic '%s' has multiple tracking issues: #%d and #%d",
+                            epic_name,
+                            tracking_number,
+                            issue.number,
+                        )
+                    # Keep lowest issue number (most likely the original tracker)
+                    if tracking_number is None or issue.number < tracking_number:
+                        tracking_number = issue.number
+                else:
+                    work_issues.append(issue)
+
+            open_count = sum(1 for i in work_issues if i.state == "open")
+            closed_count = sum(1 for i in work_issues if i.state == "closed")
+            total_points = sum(i.points for i in work_issues)
+            completed_points = sum(
+                i.points for i in work_issues if i.state == "closed"
+            )
+
+            # Group by sprint within this epic (work issues only)
+            sprint_map: dict[int, list[Issue]] = {}
+            for issue in work_issues:
                 if issue.sprint is not None:
                     sprint_map.setdefault(issue.sprint, []).append(issue)
 
@@ -1660,12 +1691,13 @@ class GiteaClient:
                 EpicSummary(
                     name=epic_name,
                     color=get_epic_color(epic_name),
-                    total_issues=len(issues),
+                    total_issues=len(work_issues),
                     open_issues=open_count,
                     closed_issues=closed_count,
                     total_points=total_points,
                     completed_points=completed_points,
                     sprints=tuple(sprint_tuples),
+                    tracking_issue_number=tracking_number,
                 )
             )
 

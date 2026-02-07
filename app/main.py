@@ -434,6 +434,9 @@ async def backlog(
             "partials/error.html", {"request": request, "error": str(e)}
         )
 
+    # Exclude epic tracking issues (they live on the epics screen)
+    all_backlog = [i for i in all_backlog if not i.is_epic_tracking]
+
     # Filter issues
     issues = all_backlog
     if ready_only:
