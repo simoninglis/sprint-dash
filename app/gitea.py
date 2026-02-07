@@ -501,7 +501,7 @@ class CIHealth:
             state = "pending"
         elif any(s == "failure" for s in real_statuses):
             state = "failure"
-        elif any(s in ("running", "waiting", "queued", "pending") for s in real_statuses):
+        elif any(s in ("running", "waiting", "queued", "pending", "in_progress") for s in real_statuses):
             state = "running"
         elif any(s == "cancelled" for s in real_statuses):
             state = "cancelled"
@@ -538,12 +538,14 @@ class CIHealth:
             "success": "✓",
             "failure": "✗",
             "running": "⏳",
+            "in_progress": "⏳",
             "waiting": "⏳",
             "queued": "⏳",
             "pending": "⏳",
             "cancelled": "⊘",
             "skipped": "–",  # Distinct from cancelled
             "neutral": "○",
+            "unknown": "?",
             "not_run": "·",  # Placeholder for workflows that haven't run
         }
         return [
@@ -1113,10 +1115,13 @@ class GiteaClient:
             resp.raise_for_status()
             runs = resp.json().get("workflow_runs", [])
 
-            # Filter runs for this SHA (exact match) and group by workflow
+            # Filter runs for this SHA on main branch and group by workflow
             workflow_runs: dict[str, dict] = {}
             for run in runs:
-                if run.get("head_sha", "") == full_sha:
+                if (
+                    run.get("head_sha", "") == full_sha
+                    and run.get("head_branch", "") == "main"
+                ):
                     # Extract workflow file from path (e.g., "ci.yml@refs/heads/main"
                     # or ".gitea/workflows/ci.yml@refs/heads/main")
                     path = run.get("path", "")
@@ -1136,18 +1141,25 @@ class GiteaClient:
                         workflow_runs[workflow_file] = run
 
             # Build workflow status map with URLs
-            # Include ALL expected workflows - missing ones shown as "pending"
+            # Include ALL expected workflows - missing ones shown as "not_run"
             workflows: dict[str, tuple[str, str]] = {}
             for wf in PIPELINE_WORKFLOWS:
                 if wf in workflow_runs:
                     run = workflow_runs[wf]
-                    status = run.get("status", "")
+                    status = (run.get("status") or "").lower()
                     if status == "completed":
-                        status = run.get("conclusion", "unknown")
+                        status = (run.get("conclusion") or "unknown").lower()
                     # else: status is running, waiting, etc.
 
                     # Use html_url from API response (includes correct run_number)
-                    url = run.get("html_url", "")
+                    # Validate URL scheme to prevent javascript:/data: injection
+                    url = run.get("html_url") or ""
+                    if url and url.startswith("/"):
+                        # Relative URL - join with base URL
+                        base = (self.base_url or "").rstrip("/")
+                        url = f"{base}{url}"
+                    elif url and not url.startswith(("https://", "http://")):
+                        url = ""
                     workflows[wf] = (status, url)
                 else:
                     # Workflow not found for this SHA - show as "not_run" (distinct from real pending)

@@ -134,7 +134,7 @@
                 {% if sprint.number == current_sprint_num and ci_health and ci_health.workflows %}
                     {% for abbrev, status, icon, url in ci_health.workflow_abbrevs %}
                     {% if url %}
-                    <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="ci-step ci-{{ status }}" title="View {{ abbrev }} logs" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</a>
+                    <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="ci-step ci-{{ status }}" title="{{ abbrev }}: {{ status }} — View logs" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</a>
                     {% else %}
                     <span class="ci-step ci-{{ status }}" title="{% if status == 'not_run' %}Not run yet{% else %}{{ status }}{% endif %}" aria-label="{{ abbrev }} workflow: {{ status }}">{{ abbrev }}:{{ icon }}</span>
                     {% endif %}
