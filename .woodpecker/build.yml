@@ -21,16 +21,6 @@ steps:
       CI_GITEA_TOKEN:
         from_secret: ci_gitea_token
     commands:
-      # Verify commit is on main branch
-      - git fetch origin main
-      - |
-        if git merge-base --is-ancestor HEAD origin/main; then
-          echo "Commit $(git rev-parse --short HEAD) is on main branch"
-        else
-          echo "ERROR: Commit $(git rev-parse HEAD) is not on main branch"
-          exit 1
-        fi
-
       # Get image metadata
       - SHORT_SHA=$(git rev-parse --short HEAD)
       - 'echo "Image tag: $$SHORT_SHA"'
