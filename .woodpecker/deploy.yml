@@ -1,6 +1,9 @@
 # Deploy: pull image and deploy to vm-gitea-runner-01.
 # Runs after build passes on main branch pushes.
 # Chain: ci → build → deploy
+#
+# Since the Woodpecker agent runs on the deploy target (local backend),
+# docker commands execute directly — no SSH needed.
 
 depends_on:
   - build
@@ -20,51 +23,39 @@ steps:
     environment:
       CI_GITEA_TOKEN:
         from_secret: ci_gitea_token
-      STAGING_SSH_KEY:
-        from_secret: staging_ssh_key
     commands:
       - SHORT_SHA=$(git rev-parse --short HEAD)
       - echo "=== Sprint-Dash Deployment ==="
       - 'echo "Image tag: $$SHORT_SHA"'
 
-      # Setup SSH key
-      - mkdir -p ~/.ssh
-      - echo "$${STAGING_SSH_KEY}" > ~/.ssh/deploy_key
-      - chmod 600 ~/.ssh/deploy_key
-      - ssh-keyscan -H vm-gitea-runner-01.internal.kellgari.com.au >> ~/.ssh/known_hosts 2>/dev/null
+      # Login to Gitea registry (temp config to avoid credential persistence)
+      - DOCKER_CONFIG_DIR=$(mktemp -d)
+      - export DOCKER_CONFIG="$$DOCKER_CONFIG_DIR"
+      - echo "$${CI_GITEA_TOKEN}" | docker login gitea.internal.kellgari.com.au -u singlis --password-stdin
+      - trap "rm -rf $$DOCKER_CONFIG_DIR" EXIT
 
-      # Deploy: pull image, stop old container, start new one
+      # Pull new image
+      - docker pull gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA
+
+      # Stop old container (if exists)
+      - docker stop sprint-dash 2>/dev/null || true
+      - docker rm sprint-dash 2>/dev/null || true
+
+      # Start new container
       - |
-        ssh -i ~/.ssh/deploy_key singlis@vm-gitea-runner-01.internal.kellgari.com.au "
-          set -e
-
-          # Login to Gitea registry
-          echo '$$CI_GITEA_TOKEN' | docker login gitea.internal.kellgari.com.au -u singlis --password-stdin
-          trap 'docker logout gitea.internal.kellgari.com.au' EXIT
-
-          # Pull new image
-          docker pull gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA
-
-          # Stop old container (if exists)
-          docker stop sprint-dash 2>/dev/null || true
-          docker rm sprint-dash 2>/dev/null || true
-
-          # Start new container
-          docker run -d \
-            --name sprint-dash \
-            --restart unless-stopped \
-            --env-file /opt/sprint-dash/.env \
-            -p 8080:8080 \
-            gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA
-        "
+        docker run -d \
+          --name sprint-dash \
+          --restart unless-stopped \
+          --env-file /opt/sprint-dash/.env \
+          -p 8080:8080 \
+          gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA
 
       - echo "Deployment triggered, waiting for health..."
 
       # Wait for health check
       - |
         for i in $(seq 1 15); do
-          if ssh -i ~/.ssh/deploy_key singlis@vm-gitea-runner-01.internal.kellgari.com.au \
-            "curl -sf --connect-timeout 5 --max-time 10 http://localhost:8080/health"; then
+          if curl -sf --connect-timeout 5 --max-time 10 http://localhost:8080/health; then
             echo ""
             echo "Sprint-dash is healthy"
             exit 0
@@ -74,6 +65,3 @@ steps:
         done
         echo "Health check failed"
         exit 1
-
-      # Cleanup SSH key
-      - rm -f ~/.ssh/deploy_key
