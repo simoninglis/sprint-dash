@@ -57,6 +57,8 @@ Copy `.env.example` to `.env` and set:
 - `GITEA_URL` - Gitea instance URL
 - `GITEA_TOKEN` - API token
 - `GITEA_OWNER` / `GITEA_REPO` - Target repository
+- `WOODPECKER_URL` - Woodpecker CI server URL (optional, for CI health display)
+- `WOODPECKER_TOKEN` - Woodpecker personal access token (optional)
 
 ## Architecture
 
@@ -64,6 +66,7 @@ Copy `.env.example` to `.env` and set:
 
 **Key components**:
 - `app/gitea.py` - Gitea API client with typed dataclasses (`Issue`, `Sprint`, `CIHealth`, `Milestone`, `BoardIssue`, etc.). Includes TTL caching (60s) and tea CLI config integration.
+- `app/woodpecker.py` - Woodpecker CI API client for pipeline health (`WoodpeckerClient`). Separate from Gitea client (different URL, token, auth). Provides `get_ci_health()` and `get_nightly_summary()`.
 - `app/main.py` - FastAPI routes. All routes check `HX-Request` header to return partials vs full pages.
 - `templates/` - Jinja2 templates using HTMX for interactivity. `base.html` contains all CSS (dark theme).
 
@@ -77,27 +80,35 @@ Copy `.env.example` to `.env` and set:
 | `GET /repos/{owner}/{repo}/issues/{n}/dependencies` | Issue dependency graph |
 | `GET /repos/{owner}/{repo}/issues/{n}/blocks` | Issues blocked by this one |
 | `GET /repos/{owner}/{repo}/milestones` | Sprint lifecycle state |
-| `GET /repos/{owner}/{repo}/branches/main` | Main branch HEAD SHA |
-| `GET /repos/{owner}/{repo}/actions/runs` | CI workflow run statuses |
+
+**Woodpecker CI APIs used** (via `WoodpeckerClient`):
+
+| API Endpoint | Purpose |
+|-------------|---------|
+| `GET /api/repos/lookup/{owner}%2F{repo}` | Resolve repo to numeric ID |
+| `GET /api/repos/{repo_id}/pipelines` | Pipeline runs (supports `?event=push\|cron` filter) |
+| `GET /api/repos/{repo_id}/pipelines/{number}` | Pipeline detail with per-workflow breakdown |
 
 ## CI Pipeline Health
 
-The dashboard shows CI pipeline health on the home page and board view for the current sprint. This uses the **Gitea Actions Runs API** (`/actions/runs`), not the commit status API (which only covers `ci.yml` jobs, missing downstream workflows).
+The dashboard shows CI pipeline health on the home page and board view for the current sprint. This uses the **Woodpecker CI Pipelines API** via a separate `WoodpeckerClient` (`app/woodpecker.py`).
 
 **Pipeline stages tracked** (defined in `PIPELINE_WORKFLOWS`):
 
 | Abbrev | Workflow | Stage |
 |--------|----------|-------|
-| C | `ci.yml` | Lint, unit tests, integration tests |
-| B | `build.yml` | Build and push Docker images |
-| D | `staging-deploy.yml` | Deploy to staging |
-| V | `staging-verify.yml` | Smoke, E2E, visual tests |
+| C | `ci` | Lint, unit tests, integration tests |
+| B | `build` | Build and push Docker images |
+| D | `staging-deploy` | Deploy to staging |
+| V | `staging-verify` | Smoke, E2E, visual tests |
+
+All four stages run as a single Woodpecker pipeline with `depends_on` chaining. The list endpoint returns pipelines; the detail endpoint provides per-workflow status breakdown.
 
 **State derivation**: Any failure → `failure`, any running → `running`, all success → `success`.
 
 **Display**: `✓` (green), `✗` (red), `⏳` (yellow) next to sprint header, with per-workflow breakdown `C:✓ B:✓ D:✓ V:✓`.
 
-**Caching**: 60-second TTL, same as issue data. CI health errors are swallowed gracefully - the dashboard renders without CI indicators rather than showing an error.
+**Caching**: 60-second TTL, same as issue data. CI health errors are swallowed gracefully - the dashboard renders without CI indicators rather than showing an error. If Woodpecker is not configured (`WOODPECKER_URL`/`WOODPECKER_TOKEN` missing), CI indicators are silently omitted.
 
 ## Design Principles
 

@@ -41,17 +41,17 @@ EPIC_COLORS: list[str] = [
 
 # CI pipeline workflows to track (in order: CI → Build → Deploy → Verify)
 PIPELINE_WORKFLOWS: tuple[str, ...] = (
-    "ci.yml",
-    "build.yml",
-    "staging-deploy.yml",
-    "staging-verify.yml",
+    "ci",
+    "build",
+    "staging-deploy",
+    "staging-verify",
 )
 
 # Nightly workflows to track (abbrev, file, display_name, warning_text)
 NIGHTLY_WORKFLOWS: tuple[tuple[str, str, str, str], ...] = (
-    ("F", "nightly-fuzz.yml", "Fuzz", "Crashes detected — review fuzz logs"),
-    ("P", "nightly-perf.yml", "Perf", "Regression detected — review perf logs"),
-    ("Q", "nightly-quality.yml", "Quality", "Issues found — review quality logs"),
+    ("F", "nightly-fuzz", "Fuzz", "Crashes detected — review fuzz logs"),
+    ("P", "nightly-perf", "Perf", "Regression detected — review perf logs"),
+    ("Q", "nightly-quality", "Quality", "Issues found — review quality logs"),
 )
 
 # Cache for dependency counts (repo:issue_number -> (blocked_by_count, blocks_count, blockers_list))
@@ -64,19 +64,6 @@ _epic_colors: dict[str, str] = {}
 
 # Milestone cache (60s TTL)
 _milestones_cache: TTLCache[str, list["Milestone"]] = TTLCache(maxsize=10, ttl=60)
-
-# CI health cache (60s TTL for success, keyed by repo)
-_ci_health_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=60)
-
-# Separate short-lived cache for CI health failures (5s TTL) to avoid hammering API
-_ci_health_failure_cache: TTLCache[str, "CIHealth"] = TTLCache(maxsize=10, ttl=5)
-
-# Nightly summary cache (60s TTL, keyed by repo)
-_nightly_cache: TTLCache[str, "NightlySummary"] = TTLCache(maxsize=10, ttl=60)
-
-# Separate short-lived cache for nightly failures (5s TTL)
-# Stores None on API error to distinguish from "no runs found"
-_nightly_failure_cache: TTLCache[str, None] = TTLCache(maxsize=10, ttl=5)
 
 # User repos cache (5 minute TTL - repos don't change often)
 _user_repos_cache: TTLCache[str, list[dict[str, str]]] = TTLCache(maxsize=1, ttl=300)
@@ -558,10 +545,10 @@ class CIHealth:
         Returns list of (abbrev, status, icon, url) tuples.
         """
         abbrev_map = {
-            "ci.yml": "C",
-            "build.yml": "B",
-            "staging-deploy.yml": "D",
-            "staging-verify.yml": "V",
+            "ci": "C",
+            "build": "B",
+            "staging-deploy": "D",
+            "staging-verify": "V",
         }
         icon_map = {
             "success": "✓",
@@ -622,7 +609,7 @@ class NightlyHealth:
         if not self.started_at:
             return "unknown"
         try:
-            started = datetime.fromisoformat(self.started_at.replace("Z", "+00:00"))
+            started = datetime.fromtimestamp(int(self.started_at), tz=UTC)
             delta = datetime.now(UTC) - started
             total_seconds = delta.total_seconds()
             if total_seconds < 0:
@@ -1321,196 +1308,6 @@ class GiteaClient:
             return planned[0].sprint_number
 
         return None  # No milestones = fallback to label-based
-
-    def get_main_sha(self, short: bool = False) -> str:
-        """Get the HEAD SHA of the main branch.
-
-        Args:
-            short: If True, return 8-char short SHA. Otherwise full SHA.
-
-        Returns:
-            SHA of main branch HEAD, or "?" on error.
-        """
-        try:
-            resp = self._client.get(f"/repos/{self.owner}/{self.repo}/branches/main")
-            resp.raise_for_status()
-            data = resp.json()
-            full_sha: str = data.get("commit", {}).get("id", "")
-            if not full_sha:
-                return "?"
-            return full_sha[:8] if short else full_sha
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            return "?"
-
-    def get_ci_health(self) -> CIHealth:
-        """Get CI pipeline health for main branch HEAD.
-
-        Returns:
-            CIHealth with overall state and per-workflow status.
-            On error, returns CIHealth with state="unknown".
-        """
-        cache_key = f"{self.base_url}:{self.owner}/{self.repo}:ci_health"
-        if cache_key in _ci_health_cache:
-            return _ci_health_cache[cache_key]
-        # Check short-lived failure cache to avoid hammering API on errors
-        if cache_key in _ci_health_failure_cache:
-            return _ci_health_failure_cache[cache_key]
-
-        try:
-            full_sha = self.get_main_sha(short=False)
-            if full_sha == "?":
-                # Cache the "unknown SHA" failure briefly
-                result = CIHealth(sha="?", state="unknown", workflows=())
-                _ci_health_failure_cache[cache_key] = result
-                return result
-
-            short_sha = full_sha[:8]
-
-            # Fetch recent workflow runs
-            resp = self._client.get(
-                f"/repos/{self.owner}/{self.repo}/actions/runs",
-                params={"limit": 20},
-            )
-            resp.raise_for_status()
-            runs = resp.json().get("workflow_runs", [])
-
-            # Filter runs for this SHA on main branch and group by workflow
-            workflow_runs: dict[str, dict] = {}
-            for run in runs:
-                if (
-                    run.get("head_sha", "") == full_sha
-                    and run.get("head_branch", "") == "main"
-                ):
-                    # Extract workflow file from path (e.g., "ci.yml@refs/heads/main"
-                    # or ".gitea/workflows/ci.yml@refs/heads/main")
-                    path = run.get("path", "")
-                    workflow_file = path.split("@")[0] if "@" in path else path
-                    # Extract just the filename (basename) to match PIPELINE_WORKFLOWS
-                    if "/" in workflow_file:
-                        workflow_file = workflow_file.rsplit("/", 1)[-1]
-
-                    # Only track pipeline workflows
-                    if workflow_file not in PIPELINE_WORKFLOWS:
-                        continue
-
-                    # Keep latest run per workflow (highest run_number)
-                    if workflow_file not in workflow_runs or run.get(
-                        "run_number", 0
-                    ) > workflow_runs[workflow_file].get("run_number", 0):
-                        workflow_runs[workflow_file] = run
-
-            # Build workflow status map with URLs
-            # Include ALL expected workflows - missing ones shown as "not_run"
-            workflows: dict[str, tuple[str, str]] = {}
-            for wf in PIPELINE_WORKFLOWS:
-                if wf in workflow_runs:
-                    run = workflow_runs[wf]
-                    status = (run.get("status") or "").lower()
-                    if status == "completed":
-                        status = (run.get("conclusion") or "unknown").lower()
-                    # else: status is running, waiting, etc.
-
-                    # Use html_url from API response (includes correct run_number)
-                    # Validate URL scheme to prevent javascript:/data: injection
-                    url = run.get("html_url") or ""
-                    if url and url.startswith("/"):
-                        # Relative URL - join with base URL
-                        base = (self.base_url or "").rstrip("/")
-                        url = f"{base}{url}"
-                    elif url and not url.startswith(("https://", "http://")):
-                        url = ""
-                    workflows[wf] = (status, url)
-                else:
-                    # Workflow not found for this SHA - show as "not_run" (distinct from real pending)
-                    workflows[wf] = ("not_run", "")
-
-            result = CIHealth.from_workflows(short_sha, workflows)
-            _ci_health_cache[cache_key] = result
-            return result
-
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            logger.warning(f"Failed to fetch CI health: {e}")
-            # Cache the failure briefly (5s) to avoid hammering API on errors
-            result = CIHealth(sha="?", state="unknown", workflows=())
-            _ci_health_failure_cache[cache_key] = result
-            return result
-
-    def get_nightly_summary(self) -> NightlySummary | None:
-        """Get status of all nightly workflow runs.
-
-        Searches for all workflows in NIGHTLY_WORKFLOWS in a single API call.
-
-        Returns:
-            NightlySummary with per-workflow status, or None on API error.
-        """
-        cache_key = f"{self.base_url}:{self.owner}/{self.repo}:nightly"
-        if cache_key in _nightly_cache:
-            return _nightly_cache[cache_key]
-        if cache_key in _nightly_failure_cache:
-            return _nightly_failure_cache[cache_key]
-
-        nightly_files = {wf for _ab, wf, _dn, _wt in NIGHTLY_WORKFLOWS}
-        unknown = NightlySummary.from_runs({})
-
-        try:
-            resp = self._client.get(
-                f"/repos/{self.owner}/{self.repo}/actions/runs",
-                params={"limit": PAGE_LIMIT},
-            )
-            resp.raise_for_status()
-            runs = resp.json().get("workflow_runs", [])
-
-            # Find the most recent run for each nightly workflow (any branch)
-            latest_runs: dict[str, dict] = {}
-            for run in runs:
-                path = run.get("path", "")
-                workflow_file = path.split("@")[0] if "@" in path else path
-                if "/" in workflow_file:
-                    workflow_file = workflow_file.rsplit("/", 1)[-1]
-
-                if workflow_file not in nightly_files:
-                    continue
-
-                if workflow_file not in latest_runs or run.get(
-                    "run_number", 0
-                ) > latest_runs[workflow_file].get("run_number", 0):
-                    latest_runs[workflow_file] = run
-
-            if not latest_runs:
-                # No nightly runs found — cache normally (not a failure, just no runs)
-                _nightly_cache[cache_key] = unknown
-                return unknown
-
-            # Build per-workflow NightlyHealth
-            run_map: dict[str, NightlyHealth] = {}
-            for wf_file, run in latest_runs.items():
-                status = (run.get("status") or "").lower()
-                if status == "completed":
-                    status = (run.get("conclusion") or "unknown").lower()
-
-                url = run.get("html_url") or ""
-                if url and url.startswith("/"):
-                    base = (self.base_url or "").rstrip("/")
-                    url = f"{base}{url}"
-                elif url and not url.startswith(("https://", "http://")):
-                    url = ""
-
-                run_map[wf_file] = NightlyHealth(
-                    workflow=wf_file,
-                    status=status,
-                    started_at=run.get("started_at", ""),
-                    url=url,
-                )
-
-            result = NightlySummary.from_runs(run_map)
-            _nightly_cache[cache_key] = result
-            return result
-
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            logger.warning(f"Failed to fetch nightly summary: {e}")
-            # Cache None briefly to rate-limit during outages
-            _nightly_failure_cache[cache_key] = None
-            return None
 
     def get_user_repos(self) -> list[dict[str, str]]:
         """Fetch repositories accessible to the authenticated user.

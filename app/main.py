@@ -20,14 +20,16 @@ from .gitea import (
     get_base_client,
     get_client,
 )
+from .woodpecker import close_woodpecker_client, get_woodpecker_client
 
 app = FastAPI(title="Sprint Dashboard")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Clean up cached Gitea clients on shutdown."""
+    """Clean up cached clients on shutdown."""
     close_all_clients()
+    close_woodpecker_client()
 
 
 # Templates
@@ -98,15 +100,15 @@ async def home(request: Request, owner: str, repo: str):
             "partials/error.html", {"request": request, "error": str(e)}
         )
 
-    # Fetch CI health (don't let failures break the page)
+    # Fetch CI health from Woodpecker (don't let failures break the page)
     ci_health: CIHealth | None = None
-    with contextlib.suppress(Exception):
-        ci_health = client.get_ci_health()
-
-    # Fetch nightly workflow summary
     nightly: NightlySummary | None = None
-    with contextlib.suppress(Exception):
-        nightly = client.get_nightly_summary()
+    wp = get_woodpecker_client()
+    if wp:
+        with contextlib.suppress(Exception):
+            ci_health = wp.get_ci_health(owner, repo)
+        with contextlib.suppress(Exception):
+            nightly = wp.get_nightly_summary(owner, repo)
 
     context = make_context(
         request,
@@ -161,15 +163,15 @@ async def board(
             "partials/error.html", {"request": request, "error": str(e)}
         )
 
-    # Fetch CI health (don't let failures break the page)
+    # Fetch CI health from Woodpecker (don't let failures break the page)
     ci_health: CIHealth | None = None
-    with contextlib.suppress(Exception):
-        ci_health = client.get_ci_health()
-
-    # Fetch nightly workflow summary
     nightly: NightlySummary | None = None
-    with contextlib.suppress(Exception):
-        nightly = client.get_nightly_summary()
+    wp = get_woodpecker_client()
+    if wp:
+        with contextlib.suppress(Exception):
+            ci_health = wp.get_ci_health(owner, repo)
+        with contextlib.suppress(Exception):
+            nightly = wp.get_nightly_summary(owner, repo)
 
     # Apply filters to backlog
     backlog = board_data.backlog
