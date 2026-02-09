@@ -59,6 +59,8 @@ Copy `.env.example` to `.env` and set:
 - `GITEA_OWNER` / `GITEA_REPO` - Target repository
 - `WOODPECKER_URL` - Woodpecker CI server URL (optional, for CI health display)
 - `WOODPECKER_TOKEN` - Woodpecker personal access token (optional)
+- `GITEA_INSECURE=1` - Disable SSL verification for self-signed Gitea certs (optional)
+- `GITEA_CA_BUNDLE` - Path to custom CA bundle (alternative to GITEA_INSECURE)
 
 ## Architecture
 
@@ -109,6 +111,39 @@ All four stages run as a single Woodpecker pipeline with `depends_on` chaining. 
 **Display**: `✓` (green), `✗` (red), `⏳` (yellow) next to sprint header, with per-workflow breakdown `C:✓ B:✓ D:✓ V:✓`.
 
 **Caching**: 60-second TTL, same as issue data. CI health errors are swallowed gracefully - the dashboard renders without CI indicators rather than showing an error. If Woodpecker is not configured (`WOODPECKER_URL`/`WOODPECKER_TOKEN` missing), CI indicators are silently omitted.
+
+## Deployment
+
+Sprint-dash runs as a Docker container on `vm-gitea-runner-01` (10.0.20.50), deployed via Woodpecker CI.
+
+**Production URL**: `http://10.0.20.50:6080`
+
+**CI/CD pipeline** (`.woodpecker/`): `ci` → `build` → `deploy` (~1 min total)
+
+| Workflow | Steps | Duration |
+|----------|-------|----------|
+| `ci.yml` | install → lint + test (parallel) | ~13s |
+| `build.yml` | docker build → trivy scan → push to Gitea registry | ~45s |
+| `deploy.yml` | docker pull → stop/rm → run → health check | ~3s |
+
+All workflows use `backend: local` (runs directly on the host, not Docker-in-Docker).
+
+**Docker image**: `gitea.internal.kellgari.com.au/singlis/sprint-dash:<short-sha>`
+
+**Runtime config**: `/opt/sprint-dash/.env` on the runner (not in repo). Contains:
+- Gitea credentials (`GITEA_URL`, `GITEA_TOKEN`, `GITEA_OWNER`, `GITEA_REPO`)
+- `GITEA_INSECURE=1` (Gitea uses self-signed cert)
+- Woodpecker credentials (`WOODPECKER_URL`, `WOODPECKER_TOKEN`)
+
+**Health endpoint**: `GET /health` → `{"status": "ok", "git_sha": "<sha>"}`
+
+**Secrets** (in Woodpecker repo settings): `ci_gitea_token` (for docker registry login)
+
+### Deployment gotchas
+- `docker restart` does NOT re-read `--env-file` — must `docker rm` + `docker run` to pick up .env changes
+- Port 6080 chosen to avoid conflicts with deckengine CI containers (8080) and browser-blocked ports (6000 = X11)
+- Woodpecker clone sets git remote to `prod-vm-gitea` URL — don't use `git fetch origin` in build steps
+- Trivy scan: starlette CVE-2024-47874 suppressed via `.trivyignore` (not exploitable, read-only app)
 
 ## Design Principles
 
