@@ -1,0 +1,4 @@
+# Starlette DoS via multipart/form-data
+# sprint-dash is read-only and does not accept file uploads.
+# Fixed in starlette >=0.40.0 (requires FastAPI upgrade from 0.109.2).
+CVE-2024-47874
