@@ -47,7 +47,7 @@ steps:
           --name sprint-dash \
           --restart unless-stopped \
           --env-file /opt/sprint-dash/.env \
-          -p 8080:8080 \
+          -p 6080:8080 \
           gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA
 
       - echo "Deployment triggered, waiting for health..."
@@ -55,7 +55,7 @@ steps:
       # Wait for health check
       - |
         for i in $(seq 1 15); do
-          if curl -sf --connect-timeout 5 --max-time 10 http://localhost:8080/health; then
+          if curl -sf --connect-timeout 5 --max-time 10 http://localhost:6080/health; then
             echo ""
             echo "Sprint-dash is healthy"
             exit 0
