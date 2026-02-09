@@ -1,4 +1,4 @@
-"""Health check endpoint for Docker and deploy verification."""
+"""Health check endpoint for Docker HEALTHCHECK and deploy verification."""
 
 import os
 
