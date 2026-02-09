@@ -1,0 +1,64 @@
+# Build: build, scan, and push Docker image to Gitea registry.
+# Runs after CI passes on main branch pushes.
+# Chain: ci → build → deploy
+
+depends_on:
+  - ci
+
+when:
+  - event: push
+    branch: main
+    path:
+      exclude: ['*.md', '.claude/**']
+
+labels:
+  backend: local
+
+steps:
+  - name: build-push
+    image: bash
+    environment:
+      CI_GITEA_TOKEN:
+        from_secret: ci_gitea_token
+    commands:
+      # Verify commit is on main branch
+      - git fetch origin main
+      - |
+        if git merge-base --is-ancestor HEAD origin/main; then
+          echo "Commit $(git rev-parse --short HEAD) is on main branch"
+        else
+          echo "ERROR: Commit $(git rev-parse HEAD) is not on main branch"
+          exit 1
+        fi
+
+      # Get image metadata
+      - SHORT_SHA=$(git rev-parse --short HEAD)
+      - 'echo "Image tag: $$SHORT_SHA"'
+
+      # Login to Gitea Container Registry (temp config to avoid credential persistence)
+      - DOCKER_CONFIG_DIR=$(mktemp -d)
+      - export DOCKER_CONFIG="$$DOCKER_CONFIG_DIR"
+      - echo "$${CI_GITEA_TOKEN}" | docker login gitea.internal.kellgari.com.au -u singlis --password-stdin
+      - trap "rm -rf $$DOCKER_CONFIG_DIR" EXIT
+
+      # Build image
+      - |
+        docker build \
+          --build-arg "GIT_SHA=$$SHORT_SHA" \
+          -t gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA \
+          .
+
+      # Scan for vulnerabilities
+      - |
+        echo "Scanning image for vulnerabilities..."
+        trivy image \
+          --severity CRITICAL,HIGH \
+          --exit-code 1 \
+          --ignore-unfixed \
+          --no-progress \
+          gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA
+        echo "No critical/high vulnerabilities found"
+
+      # Push image
+      - docker push gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA
+      - 'echo "Pushed: gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA"'

@@ -320,7 +320,15 @@ class Issue:
     def issue_type(self) -> str:
         """Infer issue type from labels."""
         for label in self.labels:
-            if label in ("bug", "feature", "tech-debt", "chore", "docs", "hotfix", "epic"):
+            if label in (
+                "bug",
+                "feature",
+                "tech-debt",
+                "chore",
+                "docs",
+                "hotfix",
+                "epic",
+            ):
                 return label
         return "unknown"
 
@@ -726,10 +734,7 @@ class NightlySummary:
 
         Returns list of (abbrev, status, icon, url) tuples.
         """
-        return [
-            (w.abbrev, w.status, w.icon, w.url)
-            for w in self.workflows
-        ]
+        return [(w.abbrev, w.status, w.icon, w.url) for w in self.workflows]
 
     @property
     def has_known(self) -> bool:
@@ -1463,9 +1468,7 @@ class GiteaClient:
             open_count = sum(1 for i in work_issues if i.state == "open")
             closed_count = sum(1 for i in work_issues if i.state == "closed")
             total_points = sum(i.points for i in work_issues)
-            completed_points = sum(
-                i.points for i in work_issues if i.state == "closed"
-            )
+            completed_points = sum(i.points for i in work_issues if i.state == "closed")
 
             # Group by sprint within this epic (work issues only)
             sprint_map: dict[int, list[Issue]] = {}

@@ -20,9 +20,11 @@ from .gitea import (
     get_base_client,
     get_client,
 )
+from .health import router as health_router
 from .woodpecker import close_woodpecker_client, get_woodpecker_client
 
 app = FastAPI(title="Sprint Dashboard")
+app.include_router(health_router)
 
 
 @app.on_event("shutdown")

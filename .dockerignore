@@ -1,0 +1,12 @@
+.git
+.gitignore
+tests/
+*.md
+.env*
+.claude/
+__pycache__
+.woodpecker/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/

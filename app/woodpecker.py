@@ -197,9 +197,7 @@ class WoodpeckerClient:
             _ci_health_failure_cache[cache_key] = unknown
             return unknown
 
-    def get_nightly_summary(
-        self, owner: str, repo: str
-    ) -> NightlySummary | None:
+    def get_nightly_summary(self, owner: str, repo: str) -> NightlySummary | None:
         """Get nightly workflow status from Woodpecker.
 
         Nightly runs are identified by event=cron. We fetch recent cron
