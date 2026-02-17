@@ -52,15 +52,6 @@ steps:
 
       - echo "Deployment triggered, waiting for health..."
 
-      # Update Caddy reverse proxy config
-      - |
-        cat > /etc/caddy/sites/sprint-dash.caddy << 'CADDY'
-        http://sprint.internal.kellgari.com.au {
-        	reverse_proxy localhost:6080
-        }
-        CADDY
-        caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-
       # Wait for health check
       - |
         for i in $(seq 1 15); do
