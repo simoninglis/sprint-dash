@@ -116,7 +116,7 @@ All four stages run as a single Woodpecker pipeline with `depends_on` chaining. 
 
 Sprint-dash runs as a Docker container on `vm-gitea-runner-01` (10.0.20.50), deployed via Woodpecker CI.
 
-**Production URL**: `http://10.0.20.50:6080`
+**Production URL**: `http://sprint.internal.kellgari.com.au:6080` (10.0.20.50)
 
 **CI/CD pipeline** (`.woodpecker/`): `ci` → `build` → `deploy` (~1 min total)
 
