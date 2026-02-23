@@ -19,26 +19,25 @@ labels:
 steps:
   - name: install
     image: bash
-    environment:
-      POETRY_VIRTUALENVS_PATH: /root/.cache/poetry-venvs
     commands:
-      - find "$POETRY_VIRTUALENVS_PATH" -maxdepth 1 -mindepth 1 -type d -mtime +3 -exec rm -rf {} + 2>/dev/null || true
-      - poetry install --no-interaction
+      - uv sync --frozen
 
   - name: lint
     image: bash
     depends_on: [install]
-    environment:
-      POETRY_VIRTUALENVS_PATH: /root/.cache/poetry-venvs
     commands:
-      - poetry run ruff check app/
-      - poetry run ruff format --check app/
-      - poetry run mypy app/
+      - uv run ruff check app/ packages/sd-cli/sd_cli/
+      - uv run ruff format --check app/ packages/sd-cli/sd_cli/
+      - uv run mypy app/
 
   - name: test
     image: bash
     depends_on: [install]
-    environment:
-      POETRY_VIRTUALENVS_PATH: /root/.cache/poetry-venvs
     commands:
-      - poetry run pytest -v --tb=short
+      - uv run pytest -v --tb=short
+
+  - name: build-sd-cli
+    image: bash
+    depends_on: [install]
+    commands:
+      - cd packages/sd-cli && uv build

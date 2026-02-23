@@ -14,29 +14,29 @@ sprint-dash is a FastAPI + HTMX dashboard for sprint tracking against Gitea repo
 
 Follow the patterns and practices documented in the [dev-manual](https://gitea.internal.kellgari.com.au/singlis/dev-manual):
 - [Python Best Practices](../dev-manual/docs/python/best-practices.md)
-- [Poetry Dependency Management](../dev-manual/docs/python/dependencies.md)
+- [uv Dependency Management](../dev-manual/docs/python/dependencies.md)
 - [Code Quality Tools](../dev-manual/docs/python/code-quality.md)
 
 ## Commands
 
 ```bash
 # Install dependencies
-poetry install
+uv sync
 
 # Run dev server
-poetry run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 # Lint and format
-poetry run ruff check app/
-poetry run ruff check app/ --fix
-poetry run ruff format app/
+uv run ruff check app/
+uv run ruff check app/ --fix
+uv run ruff format app/
 
 # Type check
-poetry run mypy app/
+uv run mypy app/
 
 # Run tests
-poetry run pytest
-poetry run pytest --cov
+uv run pytest
+uv run pytest --cov
 
 # Sprint CLI (sd-cli) — HTTP mode (default, uses SPRINT_DASH_URL)
 sd-cli --json sprint list                          # List sprints
@@ -53,7 +53,10 @@ sd-cli issue list 48                               # List issue numbers
 sd-cli --db /data/sprint-dash.db sprint current
 
 # Migrate from Gitea labels/milestones to SQLite
-poetry run python -m app.migrate
+uv run python -m app.migrate
+
+# Build sd-cli standalone package
+cd packages/sd-cli && uv build
 ```
 
 ## Configuration
@@ -96,7 +99,7 @@ Copy `.env.example` to `.env` and set:
 - `app/api_v1.py` - JSON API v1 (`/{owner}/{repo}/api/v1/`). Used by sd-cli HTTP client. All endpoints return JSON, Pydantic request models, consistent error format.
 - `app/http_client.py` - `SprintDashClient` class — sync httpx client that mirrors `SprintStore` interface over HTTP. Used by sd-cli in client-server mode.
 - `app/cli.py` - sd-cli entry point. Dual-mode: HTTP client (default, via `SPRINT_DASH_URL`) or direct SQLite (via `--db` or `SPRINT_DASH_DB`).
-- `app/migrate.py` - CLI migration: seeds SQLite from Gitea labels + milestones. Run once: `poetry run python -m app.migrate`.
+- `app/migrate.py` - CLI migration: seeds SQLite from Gitea labels + milestones. Run once: `uv run python -m app.migrate`.
 - `app/gitea.py` - Gitea API client with typed dataclasses (`Issue`, `Sprint`, `CIHealth`, `Milestone`, `BoardIssue`, etc.). Includes TTL caching (60s) and tea CLI config integration.
 - `app/woodpecker.py` - Woodpecker CI API client for pipeline health (`WoodpeckerClient`). Separate from Gitea client (different URL, token, auth). Provides `get_ci_health()` and `get_nightly_summary()`.
 - `app/main.py` - FastAPI routes. All routes check `HX-Request` header to return partials vs full pages. Uses `SprintStore` for sprint structure, `GiteaClient` for issue details.
@@ -210,7 +213,24 @@ Three main tables (see `app/database.py` for full DDL):
 | `sprint_issues` | Issue membership — which issues belong to which sprint. Soft-delete via `removed_at`. Source tracking (`migration`, `manual`, `rollover`). |
 | `sprint_snapshots` | Point-in-time captures at sprint start/end for planning-vs-execution analysis. |
 
-**Migration**: `poetry run python -m app.migrate` seeds from Gitea labels + milestones. Idempotent (UNIQUE constraints, INSERT OR IGNORE).
+**Migration**: `uv run python -m app.migrate` seeds from Gitea labels + milestones. Idempotent (UNIQUE constraints, INSERT OR IGNORE).
+
+## sd-cli Standalone Package
+
+A lightweight, HTTP-only CLI package lives at `packages/sd-cli/`. It depends only on `httpx` and is published to Gitea's built-in PyPI registry.
+
+**Package structure**: `packages/sd-cli/sd_cli/{cli,http_client}.py` — forked from `app/cli.py` and `app/http_client.py`, with SQLite/direct-mode code removed.
+
+**Publishing**: Tag `sd-cli-v<version>` triggers `.woodpecker/publish-cli.yml` to build and publish to Gitea PyPI.
+
+**Workstation install**:
+```bash
+uv tool install \
+  --index https://gitea.internal.kellgari.com.au/api/packages/singlis/pypi/simple \
+  sd-cli
+```
+
+Sprint-dash keeps its own `app/cli.py` (dual-mode: HTTP + direct SQLite) for Docker/server use.
 
 ## Design Principles
 

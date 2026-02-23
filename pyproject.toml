@@ -1,39 +1,39 @@
-[tool.poetry]
+[project]
 name = "sprint-dash"
 version = "0.1.0"
 description = "Lightweight sprint dashboard for Gitea"
-authors = ["singlis"]
-packages = [{include = "app"}]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "httpx>=0.26.0",
+    "jinja2>=3.1.0",
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.6",
+    "cachetools>=5.0.0",
+    "pyyaml>=6.0.0",
+]
 
-[tool.poetry.scripts]
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "types-pyyaml>=6.0.12",
+    "types-cachetools>=6.2.0",
+]
+
+[project.scripts]
 sd-cli = "app.cli:main"
 
-[tool.poetry.dependencies]
-python = "^3.12"
-fastapi = "^0.109.0"
-uvicorn = {extras = ["standard"], version = "^0.27.0"}
-httpx = "^0.26.0"
-jinja2 = "^3.1.0"
-python-dotenv = "^1.0.0"
-python-multipart = ">=0.0.6"
-cachetools = "^5.0.0"
-pyyaml = "^6.0.0"
-
-[tool.poetry.group.dev.dependencies]
-# Testing
-pytest = "^8.0.0"
-pytest-cov = "^4.1.0"
-pytest-asyncio = "^0.21.0"
-
-# Linting and formatting
-ruff = "^0.1.0"
-mypy = "^1.5.0"
-types-pyyaml = "^6.0.12.20250915"
-types-cachetools = "^6.2.0.20251022"
-
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
 
 # --- Tool Configurations ---
 

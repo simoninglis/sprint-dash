@@ -117,9 +117,7 @@ class SprintStore:
             method = method_map.get(
                 str(fields["status"]), "the appropriate workflow method"
             )
-            msg = (
-                f"Cannot change status via update_sprint(). " f"Use {method}() instead."
-            )
+            msg = f"Cannot change status via update_sprint(). Use {method}() instead."
             raise ValueError(msg)
         if not updates:
             return self.get_sprint(number)

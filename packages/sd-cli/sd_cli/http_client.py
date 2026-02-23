@@ -1,7 +1,6 @@
 """HTTP client for sprint-dash JSON API v1.
 
-Used by sd-cli in client-server mode to talk to a running sprint-dash
-instance over HTTP instead of accessing SQLite directly.
+Used by sd-cli to talk to a running sprint-dash instance over HTTP.
 """
 
 from __future__ import annotations

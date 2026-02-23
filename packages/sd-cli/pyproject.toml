@@ -1,0 +1,13 @@
+[project]
+name = "sd-cli"
+version = "0.1.0"
+description = "CLI client for sprint-dash sprint management"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.26.0"]
+
+[project.scripts]
+sd-cli = "sd_cli.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

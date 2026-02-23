@@ -55,9 +55,9 @@ NIGHTLY_WORKFLOWS: tuple[tuple[str, str, str, str], ...] = (
 )
 
 # Cache for dependency counts (repo:issue_number -> (blocked_by_count, blocks_count, blockers_list))
-_deps_cache: TTLCache[
-    str, tuple[int, int, list[tuple[int, str, int | None]]]
-] = TTLCache(maxsize=500, ttl=60)
+_deps_cache: TTLCache[str, tuple[int, int, list[tuple[int, str, int | None]]]] = (
+    TTLCache(maxsize=500, ttl=60)
+)
 
 # Cache for epic -> color mapping (built per board load)
 _epic_colors: dict[str, str] = {}

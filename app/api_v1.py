@@ -243,7 +243,9 @@ async def close_sprint(
     issues = store.get_issue_numbers(n)
     end_date = datetime.now(UTC).strftime("%Y-%m-%d")
 
-    carry_over_to = body.carry_over_to if body.carry_over_to and body.carry_over_to > 0 else None
+    carry_over_to = (
+        body.carry_over_to if body.carry_over_to and body.carry_over_to > 0 else None
+    )
 
     try:
         result = store.close_sprint(
@@ -284,9 +286,7 @@ async def list_issues(request: Request, owner: str, repo: str, n: int):
 
 
 @router.post("/{owner}/{repo}/api/v1/sprints/{n}/issues")
-async def add_issues(
-    request: Request, owner: str, repo: str, n: int, body: IssueAdd
-):
+async def add_issues(request: Request, owner: str, repo: str, n: int, body: IssueAdd):
     store = _get_store(owner, repo)
     sprint = store.get_sprint(n)
     if not sprint:
@@ -317,17 +317,13 @@ async def add_issues(
 
 
 @router.delete("/{owner}/{repo}/api/v1/sprints/{n}/issues/{issue}")
-async def remove_issue(
-    request: Request, owner: str, repo: str, n: int, issue: int
-):
+async def remove_issue(request: Request, owner: str, repo: str, n: int, issue: int):
     store = _get_store(owner, repo)
     sprint = store.get_sprint(n)
     if not sprint:
         return _error(f"Sprint {n} not found", "not_found", 404)
     if not store.remove_issue(n, issue):
-        return _error(
-            f"Issue {issue} not found in sprint {n}", "not_found", 404
-        )
+        return _error(f"Issue {issue} not found in sprint {n}", "not_found", 404)
     return Response(status_code=204)
 
 

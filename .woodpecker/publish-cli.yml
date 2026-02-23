@@ -1,0 +1,34 @@
+# Publish sd-cli to Gitea PyPI registry.
+# Triggered by sd-cli-v* tags.
+
+when:
+  - event: tag
+    ref: refs/tags/sd-cli-v*
+
+labels:
+  backend: local
+
+steps:
+  - name: build
+    image: bash
+    commands:
+      # Verify tag version matches pyproject.toml version
+      - TAG_VERSION="${CI_COMMIT_TAG#sd-cli-v}"
+      - PKG_VERSION="$(uv run python -c "import tomllib; print(tomllib.load(open('packages/sd-cli/pyproject.toml','rb'))['project']['version'])")"
+      - |
+        if [ "$$TAG_VERSION" != "$$PKG_VERSION" ]; then
+          echo "Version mismatch: tag=$$TAG_VERSION pyproject=$$PKG_VERSION"
+          exit 1
+        fi
+      - cd packages/sd-cli
+      - uv build
+
+  - name: publish
+    image: bash
+    depends_on: [build]
+    environment:
+      CI_GITEA_TOKEN:
+        from_secret: ci_gitea_token
+    commands:
+      - cd packages/sd-cli
+      - uv publish --publish-url https://gitea.internal.kellgari.com.au/api/packages/singlis/pypi --token "$CI_GITEA_TOKEN" dist/*
