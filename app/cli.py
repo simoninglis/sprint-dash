@@ -1,7 +1,7 @@
 """sd-cli: Sprint management CLI for Claude Code and terminal use.
 
 Usage:
-    sd-cli [--json] [--db PATH] [--owner OWNER] [--repo REPO] COMMAND
+    sd-cli [--json] [--db PATH] [--url URL] [--owner OWNER] [--repo REPO] COMMAND
 
 Commands:
     sprint list [--status STATUS]     List all sprints
@@ -17,7 +17,13 @@ Commands:
     issue remove NUMBER ISSUE...      Remove issues from a sprint
     issue move FROM ISSUE... --to TO  Move issues between sprints
     batch                             Execute multiple operations from stdin JSON
+
+Modes:
+    HTTP (default): Set SPRINT_DASH_URL or --url to talk to sprint-dash server.
+    Direct SQLite:  Set SPRINT_DASH_DB or --db to access the database directly.
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -25,11 +31,26 @@ import os
 import re
 import sys
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from .database import get_connection, init_schema
+from .http_client import SprintDashClient, SprintDashError
 from .sprint_store import SprintStore
 
+if TYPE_CHECKING:
+    # Both SprintStore and SprintDashClient share a common duck-typed interface
+    Backend = SprintStore | SprintDashClient
+
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _positive_int(value: str) -> int:
+    """Argparse type: parse a positive integer (> 0)."""
+    n = int(value)
+    if n <= 0:
+        msg = f"must be a positive integer, got {n}"
+        raise argparse.ArgumentTypeError(msg)
+    return n
 
 
 def _validate_date(value: str | None, field_name: str) -> None:
@@ -48,22 +69,37 @@ def _validate_date(value: str | None, field_name: str) -> None:
         sys.exit(1)
 
 
-def _get_store(args: argparse.Namespace) -> SprintStore:
-    """Create a SprintStore from CLI args + env vars.
+def _get_backend(args: argparse.Namespace) -> Backend:
+    """Get a sprint backend — HTTP client or direct SQLite backend.
 
-    Stores the connection on args._conn so main() can close it.
+    Selection logic:
+    - If --url or SPRINT_DASH_URL is set (and --db is not), use HTTP mode.
+    - Otherwise, use direct SQLite mode.
+
+    Stores resources on args for cleanup in main().
     """
-    db_path = args.db or os.getenv("SPRINT_DASH_DB", "/data/sprint-dash.db")
-    owner = args.owner or os.getenv("GITEA_OWNER", "")
-    repo = args.repo or os.getenv("GITEA_REPO", "")
+    url = getattr(args, "url", None) or os.getenv("SPRINT_DASH_URL", "")
+    db_path = getattr(args, "db", None) or os.getenv("SPRINT_DASH_DB", "")
+
+    owner = args.owner or os.getenv("SPRINT_DASH_OWNER", "") or os.getenv("GITEA_OWNER", "")
+    repo = args.repo or os.getenv("SPRINT_DASH_REPO", "") or os.getenv("GITEA_REPO", "")
 
     if not owner or not repo:
         print(
-            "Error: --owner/--repo or GITEA_OWNER/GITEA_REPO required", file=sys.stderr
+            "Error: --owner/--repo or SPRINT_DASH_OWNER/SPRINT_DASH_REPO required",
+            file=sys.stderr,
         )
         sys.exit(1)
 
-    conn = get_connection(db_path)
+    # HTTP mode: --url or SPRINT_DASH_URL (unless --db forces direct mode)
+    if url and not db_path:
+        client = SprintDashClient(url, owner, repo)
+        args._http_client = client  # noqa: SLF001
+        return client
+
+    # Direct SQLite mode
+    resolved_db = db_path or "/data/sprint-dash.db"
+    conn = get_connection(resolved_db)
     init_schema(conn)
     args._conn = conn  # noqa: SLF001
     return SprintStore(conn, owner, repo)
@@ -95,8 +131,8 @@ def _print_row(d: dict) -> None:
 
 
 def cmd_sprint_list(args: argparse.Namespace) -> None:
-    store = _get_store(args)
-    sprints = store.list_sprints(status=args.status)
+    backend = _get_backend(args)
+    sprints = backend.list_sprints(status=args.status)
     if args.json:
         _output(sprints, json_mode=True)
     else:
@@ -116,30 +152,38 @@ def cmd_sprint_list(args: argparse.Namespace) -> None:
 
 
 def cmd_sprint_show(args: argparse.Namespace) -> None:
-    store = _get_store(args)
-    sprint = store.get_sprint(args.number)
+    backend = _get_backend(args)
+    sprint = backend.get_sprint(args.number)
     if not sprint:
         print(f"Sprint {args.number} not found.", file=sys.stderr)
         sys.exit(1)
 
-    issues = store.get_issue_numbers(args.number)
-    sprint["issues"] = issues
-    sprint["issue_count"] = len(issues)
+    # HTTP mode returns enriched response; direct mode needs extra calls
+    if "issues" not in sprint:
+        issues = backend.get_issue_numbers(args.number)
+        sprint["issues"] = issues
+        sprint["issue_count"] = len(issues)
+    else:
+        issues = sprint["issues"]
 
-    start_snap = store.get_snapshot(args.number, "start")
-    end_snap = store.get_snapshot(args.number, "end")
-    if start_snap:
-        sprint["start_snapshot"] = start_snap
-    if end_snap:
-        sprint["end_snapshot"] = end_snap
+    if "start_snapshot" not in sprint:
+        start_snap = backend.get_snapshot(args.number, "start")
+        end_snap = backend.get_snapshot(args.number, "end")
+        if start_snap:
+            sprint["start_snapshot"] = start_snap
+        if end_snap:
+            sprint["end_snapshot"] = end_snap
+
+    start_snap = sprint.get("start_snapshot")
+    end_snap = sprint.get("end_snapshot")
 
     if args.json:
         _output(sprint, json_mode=True)
     else:
         print(f"Sprint {sprint['number']}  [{sprint['status']}]")
-        if sprint["goal"]:
+        if sprint.get("goal"):
             print(f"Goal: {sprint['goal']}")
-        print(f"Start: {sprint['start_date'] or '-'}  End: {sprint['end_date'] or '-'}")
+        print(f"Start: {sprint.get('start_date') or '-'}  End: {sprint.get('end_date') or '-'}")
         print(f"Issues ({len(issues)}): {', '.join(f'#{n}' for n in issues) or 'none'}")
         if start_snap:
             print(
@@ -154,9 +198,9 @@ def cmd_sprint_show(args: argparse.Namespace) -> None:
 def cmd_sprint_create(args: argparse.Namespace) -> None:
     _validate_date(args.start, "start date")
     _validate_date(args.end, "end date")
-    store = _get_store(args)
+    backend = _get_backend(args)
     try:
-        sprint = store.create_sprint(
+        sprint = backend.create_sprint(
             args.number,
             status=args.status,
             start_date=args.start,
@@ -172,7 +216,7 @@ def cmd_sprint_create(args: argparse.Namespace) -> None:
 def cmd_sprint_update(args: argparse.Namespace) -> None:
     _validate_date(args.start, "start date")
     _validate_date(args.end, "end date")
-    store = _get_store(args)
+    backend = _get_backend(args)
     fields: dict[str, str | None] = {}
     if args.start is not None:
         fields["start_date"] = args.start
@@ -186,8 +230,8 @@ def cmd_sprint_update(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     try:
-        sprint = store.update_sprint(args.number, **fields)
-    except ValueError as e:
+        sprint = backend.update_sprint(args.number, **fields)
+    except (ValueError, SprintDashError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     if not sprint:
@@ -198,26 +242,31 @@ def cmd_sprint_update(args: argparse.Namespace) -> None:
 
 def cmd_sprint_start(args: argparse.Namespace) -> None:
     _validate_date(args.start, "start date")
-    store = _get_store(args)
-    start_date = args.start or datetime.now(UTC).strftime("%Y-%m-%d")
+    backend = _get_backend(args)
 
     try:
-        result = store.start_sprint(args.number, start_date=start_date)
-    except ValueError as e:
+        if isinstance(backend, SprintDashClient):
+            result = backend.start_sprint(
+                args.number, start_date=args.start
+            )
+        else:
+            start_date = args.start or datetime.now(UTC).strftime("%Y-%m-%d")
+            result = backend.start_sprint(args.number, start_date=start_date)
+    except (ValueError, SprintDashError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     if args.json:
         _output(result, json_mode=True)
     else:
-        print(f"Sprint {args.number} started ({start_date})")
-        print(f"Start snapshot: {len(result['issues'])} issues")
+        display_date = result.get("start_date", args.start or "today")
+        print(f"Sprint {args.number} started ({display_date})")
+        issues = result.get("issues", [])
+        print(f"Start snapshot: {len(issues)} issues")
 
 
 def cmd_sprint_close(args: argparse.Namespace) -> None:
-    store = _get_store(args)
-    issues = store.get_issue_numbers(args.number)
-    end_date = datetime.now(UTC).strftime("%Y-%m-%d")
+    backend = _get_backend(args)
 
     # Normalize: <=0 means "no carry-over" (consistent with API)
     carry_over_to = (
@@ -225,24 +274,30 @@ def cmd_sprint_close(args: argparse.Namespace) -> None:
     )
 
     try:
-        result = store.close_sprint(
-            args.number,
-            end_date=end_date,
-            total_issues=len(issues),
-            total_points=0,  # Points require Gitea; CLI captures count only
-            issue_numbers=issues,
-            carry_over_to=carry_over_to,
-            carry_over_issues=issues if carry_over_to is not None else None,
-        )
-    except ValueError as e:
+        if isinstance(backend, SprintDashClient):
+            result = backend.close_sprint(
+                args.number, carry_over_to=carry_over_to
+            )
+        else:
+            issues = backend.get_issue_numbers(args.number)
+            result = backend.close_sprint(
+                args.number,
+                end_date=datetime.now(UTC).strftime("%Y-%m-%d"),
+                total_issues=len(issues),
+                total_points=0,
+                issue_numbers=issues,
+                carry_over_to=carry_over_to,
+                carry_over_issues=issues if carry_over_to is not None else None,
+            )
+    except (ValueError, SprintDashError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     if args.json:
         _output(result, json_mode=True)
     else:
-        print(f"Sprint {args.number} closed ({end_date})")
-        print(f"End snapshot: {len(issues)} issues")
+        display_date = result.get("end_date", "today")
+        print(f"Sprint {args.number} closed ({display_date})")
         if "carried_over" in result:
             co = result["carried_over"]
             print(
@@ -251,10 +306,10 @@ def cmd_sprint_close(args: argparse.Namespace) -> None:
 
 
 def cmd_sprint_cancel(args: argparse.Namespace) -> None:
-    store = _get_store(args)
+    backend = _get_backend(args)
     try:
-        result = store.cancel_sprint(args.number)
-    except ValueError as e:
+        result = backend.cancel_sprint(args.number)
+    except (ValueError, SprintDashError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -267,8 +322,8 @@ def cmd_sprint_cancel(args: argparse.Namespace) -> None:
 
 
 def cmd_sprint_current(args: argparse.Namespace) -> None:
-    store = _get_store(args)
-    number = store.get_current_sprint_number()
+    backend = _get_backend(args)
+    number = backend.get_current_sprint_number()
     if args.json:
         _output({"current_sprint": number}, json_mode=True)
     elif number:
@@ -282,13 +337,13 @@ def cmd_sprint_current(args: argparse.Namespace) -> None:
 
 
 def cmd_issue_list(args: argparse.Namespace) -> None:
-    store = _get_store(args)
-    sprint = store.get_sprint(args.sprint_number)
+    backend = _get_backend(args)
+    sprint = backend.get_sprint(args.sprint_number)
     if not sprint:
         print(f"Sprint {args.sprint_number} not found.", file=sys.stderr)
         sys.exit(1)
 
-    issues = store.get_issue_numbers(args.sprint_number)
+    issues = backend.get_issue_numbers(args.sprint_number)
     if args.json:
         _output(
             {"sprint": args.sprint_number, "issues": issues, "count": len(issues)},
@@ -302,11 +357,11 @@ def cmd_issue_list(args: argparse.Namespace) -> None:
 
 
 def cmd_issue_add(args: argparse.Namespace) -> None:
-    store = _get_store(args)
+    backend = _get_backend(args)
     added = []
     failed = []
     for num in args.issues:
-        if store.add_issue(args.sprint_number, num, source=args.source):
+        if backend.add_issue(args.sprint_number, num, source=args.source):
             added.append(num)
         else:
             failed.append(num)
@@ -328,11 +383,11 @@ def cmd_issue_add(args: argparse.Namespace) -> None:
 
 
 def cmd_issue_remove(args: argparse.Namespace) -> None:
-    store = _get_store(args)
+    backend = _get_backend(args)
     removed = []
     failed = []
     for num in args.issues:
-        if store.remove_issue(args.sprint_number, num):
+        if backend.remove_issue(args.sprint_number, num):
             removed.append(num)
         else:
             failed.append(num)
@@ -357,11 +412,11 @@ def cmd_issue_remove(args: argparse.Namespace) -> None:
 
 
 def cmd_issue_move(args: argparse.Namespace) -> None:
-    store = _get_store(args)
+    backend = _get_backend(args)
     moved = []
     failed = []
     for num in args.issues:
-        if store.move_issue(num, args.from_sprint, args.to_sprint):
+        if backend.move_issue(num, args.from_sprint, args.to_sprint):
             moved.append(num)
         else:
             failed.append(num)
@@ -413,7 +468,7 @@ def cmd_batch(args: argparse.Namespace) -> None:
         issue remove   - args: sprint, issues (list of ints)
         issue move     - args: from_sprint, to_sprint, issues (list of ints)
     """
-    store = _get_store(args)
+    backend = _get_backend(args)
 
     raw = sys.stdin.read()
     try:
@@ -443,7 +498,7 @@ def cmd_batch(args: argparse.Namespace) -> None:
         cmd = op.get("command", "")
         op_args = op.get("args", {})
         try:
-            result = _execute_batch_op(store, cmd, op_args)
+            result = _execute_batch_op(backend, cmd, op_args)
             results.append({"index": i, "command": cmd, "ok": True, "result": result})
         except Exception as e:
             errors.append({"index": i, "command": cmd, "ok": False, "error": str(e)})
@@ -469,7 +524,7 @@ def _validate_batch_date(value: str | None, field_name: str) -> None:
         raise ValueError(msg) from None
 
 
-def _execute_batch_op(store: SprintStore, command: str, args: dict) -> dict:
+def _execute_batch_op(backend: Backend, command: str, args: dict) -> dict:
     """Execute a single batch operation."""
     if not isinstance(args, dict):
         msg = f"Expected args to be dict, got {type(args).__name__}"
@@ -477,7 +532,7 @@ def _execute_batch_op(store: SprintStore, command: str, args: dict) -> dict:
     if command == "sprint create":
         _validate_batch_date(args.get("start"), "start date")
         _validate_batch_date(args.get("end"), "end date")
-        sprint = store.create_sprint(
+        sprint = backend.create_sprint(
             args["number"],
             goal=args.get("goal", ""),
             start_date=args.get("start"),
@@ -495,7 +550,7 @@ def _execute_batch_op(store: SprintStore, command: str, args: dict) -> dict:
             fields["start_date"] = args["start"]
         if "end" in args:
             fields["end_date"] = args["end"]
-        result = store.update_sprint(args["number"], **fields)
+        result = backend.update_sprint(args["number"], **fields)
         if not result:
             msg = f"Sprint {args['number']} not found"
             raise ValueError(msg)
@@ -504,10 +559,10 @@ def _execute_batch_op(store: SprintStore, command: str, args: dict) -> dict:
     if command == "sprint start":
         _validate_batch_date(args.get("start"), "start date")
         start_date = args.get("start") or datetime.now(UTC).strftime("%Y-%m-%d")
-        return store.start_sprint(args["number"], start_date=start_date)
+        return backend.start_sprint(args["number"], start_date=start_date)
 
     if command == "sprint close":
-        issues = store.get_issue_numbers(args["number"])
+        issues = backend.get_issue_numbers(args["number"])
         carry_over_to_raw = args.get("carry_over_to")
         # Normalize: <=0 and None both mean "no carry-over" (consistent with API)
         carry_over_to = (
@@ -519,7 +574,7 @@ def _execute_batch_op(store: SprintStore, command: str, args: dict) -> dict:
         carry_over_issues = (
             args.get("carry_over_issues", issues) if carry_over_to is not None else None
         )
-        return store.close_sprint(
+        return backend.close_sprint(
             args["number"],
             end_date=datetime.now(UTC).strftime("%Y-%m-%d"),
             total_issues=len(issues),
@@ -530,13 +585,13 @@ def _execute_batch_op(store: SprintStore, command: str, args: dict) -> dict:
         )
 
     if command == "sprint cancel":
-        return store.cancel_sprint(args["number"])
+        return backend.cancel_sprint(args["number"])
 
     if command == "issue add":
         added = []
         failed = []
         for num in args["issues"]:
-            if store.add_issue(
+            if backend.add_issue(
                 args["sprint"], num, source=args.get("source", "manual")
             ):
                 added.append(num)
@@ -551,7 +606,7 @@ def _execute_batch_op(store: SprintStore, command: str, args: dict) -> dict:
         removed = []
         failed = []
         for num in args["issues"]:
-            if store.remove_issue(args["sprint"], num):
+            if backend.remove_issue(args["sprint"], num):
                 removed.append(num)
             else:
                 failed.append(num)
@@ -564,7 +619,7 @@ def _execute_batch_op(store: SprintStore, command: str, args: dict) -> dict:
         moved = []
         failed = []
         for num in args["issues"]:
-            if store.move_issue(num, args["from_sprint"], args["to_sprint"]):
+            if backend.move_issue(num, args["from_sprint"], args["to_sprint"]):
                 moved.append(num)
             else:
                 failed.append(num)
@@ -591,11 +646,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument(
-        "--db",
-        help="SQLite database path (default: $SPRINT_DASH_DB or /data/sprint-dash.db)",
+        "--url",
+        help="Sprint-dash server URL (default: $SPRINT_DASH_URL). Enables HTTP mode.",
     )
-    parser.add_argument("--owner", help="Repo owner (default: $GITEA_OWNER)")
-    parser.add_argument("--repo", help="Repo name (default: $GITEA_REPO)")
+    parser.add_argument(
+        "--db",
+        help="SQLite database path (default: $SPRINT_DASH_DB). Forces direct mode.",
+    )
+    parser.add_argument(
+        "--owner", help="Repo owner (default: $SPRINT_DASH_OWNER or $GITEA_OWNER)"
+    )
+    parser.add_argument(
+        "--repo", help="Repo name (default: $SPRINT_DASH_REPO or $GITEA_REPO)"
+    )
 
     sub = parser.add_subparsers(dest="command", help="Command group")
 
@@ -612,12 +675,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     # sprint show
     sp_show = sprint_sub.add_parser("show", help="Show sprint details")
-    sp_show.add_argument("number", type=int)
+    sp_show.add_argument("number", type=_positive_int)
     sp_show.set_defaults(func=cmd_sprint_show)
 
     # sprint create
     sp_create = sprint_sub.add_parser("create", help="Create a sprint")
-    sp_create.add_argument("number", type=int)
+    sp_create.add_argument("number", type=_positive_int)
     sp_create.add_argument("--status", default="planned", choices=["planned"])
     sp_create.add_argument("--start", help="Start date (YYYY-MM-DD)")
     sp_create.add_argument("--end", help="End date (YYYY-MM-DD)")
@@ -626,7 +689,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # sprint update
     sp_update = sprint_sub.add_parser("update", help="Update a sprint")
-    sp_update.add_argument("number", type=int)
+    sp_update.add_argument("number", type=_positive_int)
     sp_update.add_argument("--start", help="Start date (YYYY-MM-DD)")
     sp_update.add_argument("--end", help="End date (YYYY-MM-DD)")
     sp_update.add_argument(
@@ -636,21 +699,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     # sprint start
     sp_start = sprint_sub.add_parser("start", help="Start a sprint")
-    sp_start.add_argument("number", type=int)
+    sp_start.add_argument("number", type=_positive_int)
     sp_start.add_argument("--start", help="Start date (default: today)")
     sp_start.set_defaults(func=cmd_sprint_start)
 
     # sprint close
     sp_close = sprint_sub.add_parser("close", help="Close a sprint")
-    sp_close.add_argument("number", type=int)
+    sp_close.add_argument("number", type=_positive_int)
     sp_close.add_argument(
-        "--carry-over-to", type=int, help="Sprint number to carry open issues to"
+        "--carry-over-to", type=_positive_int, help="Sprint number to carry open issues to"
     )
     sp_close.set_defaults(func=cmd_sprint_close)
 
     # sprint cancel
     sp_cancel = sprint_sub.add_parser("cancel", help="Cancel a sprint")
-    sp_cancel.add_argument("number", type=int)
+    sp_cancel.add_argument("number", type=_positive_int)
     sp_cancel.set_defaults(func=cmd_sprint_cancel)
 
     # sprint current
@@ -663,28 +726,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     # issue list
     is_list = issue_sub.add_parser("list", help="List issues in a sprint")
-    is_list.add_argument("sprint_number", type=int)
+    is_list.add_argument("sprint_number", type=_positive_int)
     is_list.set_defaults(func=cmd_issue_list)
 
     # issue add
     is_add = issue_sub.add_parser("add", help="Add issues to a sprint")
-    is_add.add_argument("sprint_number", type=int)
-    is_add.add_argument("issues", type=int, nargs="+", help="Issue numbers")
+    is_add.add_argument("sprint_number", type=_positive_int)
+    is_add.add_argument("issues", type=_positive_int, nargs="+", help="Issue numbers")
     is_add.add_argument("--source", default="manual", choices=["manual", "rollover"])
     is_add.set_defaults(func=cmd_issue_add)
 
     # issue remove
     is_remove = issue_sub.add_parser("remove", help="Remove issues from a sprint")
-    is_remove.add_argument("sprint_number", type=int)
-    is_remove.add_argument("issues", type=int, nargs="+", help="Issue numbers")
+    is_remove.add_argument("sprint_number", type=_positive_int)
+    is_remove.add_argument("issues", type=_positive_int, nargs="+", help="Issue numbers")
     is_remove.set_defaults(func=cmd_issue_remove)
 
     # issue move
     is_move = issue_sub.add_parser("move", help="Move issues between sprints")
-    is_move.add_argument("from_sprint", type=int, help="Source sprint number")
-    is_move.add_argument("issues", type=int, nargs="+", help="Issue numbers")
+    is_move.add_argument("from_sprint", type=_positive_int, help="Source sprint number")
+    is_move.add_argument("issues", type=_positive_int, nargs="+", help="Issue numbers")
     is_move.add_argument(
-        "--to", type=int, required=True, dest="to_sprint", help="Target sprint number"
+        "--to", type=_positive_int, required=True, dest="to_sprint", help="Target sprint number"
     )
     is_move.set_defaults(func=cmd_issue_move)
 
@@ -716,10 +779,16 @@ def main(argv: list[str] | None = None) -> None:
     if hasattr(args, "func"):
         try:
             args.func(args)
+        except SprintDashError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
         finally:
             conn = getattr(args, "_conn", None)
             if conn is not None:
                 conn.close()
+            http_client = getattr(args, "_http_client", None)
+            if http_client is not None:
+                http_client.close()
     else:
         parser.print_help()
         sys.exit(1)

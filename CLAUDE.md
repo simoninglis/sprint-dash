@@ -38,7 +38,7 @@ poetry run mypy app/
 poetry run pytest
 poetry run pytest --cov
 
-# Sprint CLI (sd-cli)
+# Sprint CLI (sd-cli) — HTTP mode (default, uses SPRINT_DASH_URL)
 sd-cli --json sprint list                          # List sprints
 sd-cli --json sprint show 47                       # Sprint details + issues
 sd-cli sprint create 48 --start 2026-03-09 --end 2026-03-23 --goal "Feature X"
@@ -48,6 +48,9 @@ sd-cli sprint current                              # Current sprint number
 sd-cli issue add 48 101 102 103                    # Add issues to sprint
 sd-cli issue remove 48 101                         # Remove issue from sprint
 sd-cli issue list 48                               # List issue numbers
+
+# Sprint CLI — direct SQLite mode (inside Docker or with --db)
+sd-cli --db /data/sprint-dash.db sprint current
 
 # Migrate from Gitea labels/milestones to SQLite
 poetry run python -m app.migrate
@@ -77,6 +80,11 @@ Copy `.env.example` to `.env` and set:
 - `GITEA_CA_BUNDLE` - Path to custom CA bundle (alternative to GITEA_INSECURE)
 - `SPRINT_DASH_DB` - SQLite database path (default: `/data/sprint-dash.db`)
 
+### sd-cli client config (on dev machine)
+- `SPRINT_DASH_URL` - Sprint-dash server URL (e.g., `http://sprint.internal.kellgari.com.au:6080`). Enables HTTP mode.
+- `SPRINT_DASH_OWNER` / `SPRINT_DASH_REPO` - Target repo (falls back to `GITEA_OWNER`/`GITEA_REPO`)
+- `SPRINT_DASH_DB` - If set, forces direct SQLite mode (overrides `SPRINT_DASH_URL`)
+
 ## Architecture
 
 **Data flow**: SQLite (sprint structure) + Gitea API (issue metadata) → FastAPI routes → Jinja2 templates
@@ -84,7 +92,10 @@ Copy `.env.example` to `.env` and set:
 **Key components**:
 - `app/database.py` - SQLite connection manager. WAL mode, foreign keys, schema init. Singleton connection via `get_db()`. Path from `SPRINT_DASH_DB` env var (default `/data/sprint-dash.db`).
 - `app/sprint_store.py` - `SprintStore` class — all sprint CRUD, repo-scoped by `(owner, repo)`. Manages sprints, sprint_issues (with soft-delete via `removed_at`), and snapshots.
-- `app/api.py` - Write endpoints (sprint CRUD, issue add/remove, carry-over, close). All return HTMX partials for in-place UI updates.
+- `app/api.py` - HTMX write endpoints (sprint CRUD, issue add/remove, carry-over, close). Returns HTMX partials for in-place UI updates.
+- `app/api_v1.py` - JSON API v1 (`/{owner}/{repo}/api/v1/`). Used by sd-cli HTTP client. All endpoints return JSON, Pydantic request models, consistent error format.
+- `app/http_client.py` - `SprintDashClient` class — sync httpx client that mirrors `SprintStore` interface over HTTP. Used by sd-cli in client-server mode.
+- `app/cli.py` - sd-cli entry point. Dual-mode: HTTP client (default, via `SPRINT_DASH_URL`) or direct SQLite (via `--db` or `SPRINT_DASH_DB`).
 - `app/migrate.py` - CLI migration: seeds SQLite from Gitea labels + milestones. Run once: `poetry run python -m app.migrate`.
 - `app/gitea.py` - Gitea API client with typed dataclasses (`Issue`, `Sprint`, `CIHealth`, `Milestone`, `BoardIssue`, etc.). Includes TTL caching (60s) and tea CLI config integration.
 - `app/woodpecker.py` - Woodpecker CI API client for pipeline health (`WoodpeckerClient`). Separate from Gitea client (different URL, token, auth). Provides `get_ci_health()` and `get_nightly_summary()`.
@@ -113,6 +124,25 @@ Copy `.env.example` to `.env` and set:
 | `GET /api/repos/lookup/{owner}%2F{repo}` | Resolve repo to numeric ID |
 | `GET /api/repos/{repo_id}/pipelines` | Pipeline runs (supports `?event=push\|cron` filter) |
 | `GET /api/repos/{repo_id}/pipelines/{number}` | Pipeline detail with per-workflow breakdown |
+
+**JSON API v1** (`/{owner}/{repo}/api/v1/`) — used by sd-cli HTTP client:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/sprints` | List sprints (optional `?status=` filter) |
+| GET | `/sprints/current` | Current in-progress sprint |
+| GET | `/sprints/{n}` | Sprint detail with issues + snapshots |
+| POST | `/sprints` | Create sprint (body: `SprintCreate`) |
+| PUT | `/sprints/{n}` | Update sprint dates/goal (body: `SprintUpdate`) |
+| POST | `/sprints/{n}/start` | Start sprint (body: `SprintStart`) |
+| POST | `/sprints/{n}/close` | Close sprint (body: `SprintClose`) |
+| POST | `/sprints/{n}/cancel` | Cancel sprint |
+| GET | `/sprints/{n}/issues` | List issue numbers |
+| POST | `/sprints/{n}/issues` | Add issues (body: `IssueAdd`) |
+| DELETE | `/sprints/{n}/issues/{issue}` | Remove issue (204) |
+| POST | `/issues/move` | Move issues between sprints (body: `IssueMove`) |
+
+Error responses: `{"error": "message", "code": "not_found|lifecycle_error|conflict|internal_error"}`.
 
 ## CI Pipeline Health
 

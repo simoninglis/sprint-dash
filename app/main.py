@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .api import router as api_router
+from .api_v1 import router as api_v1_router
 from .database import close_db, get_db
 from .gitea import (
     BacklogStats,
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Sprint Dashboard")
 app.include_router(health_router)
 app.include_router(api_router)
+app.include_router(api_v1_router)
 
 
 @app.on_event("shutdown")
