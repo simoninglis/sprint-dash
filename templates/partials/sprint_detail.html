@@ -1,4 +1,19 @@
-<h1>Sprint {{ sprint.number }}</h1>
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h1 style="margin-bottom: 0;">Sprint {{ sprint.number }}</h1>
+    <div class="sprint-actions">
+        <button class="btn btn-ghost btn-sm"
+                hx-get="{{ repo_url('/api/sprints/' ~ sprint.number ~ '/edit-form') }}"
+                hx-target="#sprint-edit-target"
+                hx-swap="innerHTML">Edit</button>
+        {% if sprint.lifecycle_state == 'in_progress' %}
+        <button class="btn btn-accent btn-sm"
+                hx-get="{{ repo_url('/api/sprints/' ~ sprint.number ~ '/close-form') }}"
+                hx-target="#modal-container"
+                hx-swap="innerHTML">Close Sprint</button>
+        {% endif %}
+    </div>
+</div>
+<div id="sprint-edit-target"></div>
 
 <div class="card">
     <div class="grid" style="grid-template-columns: repeat(4, 1fr);">
@@ -27,6 +42,80 @@
 {% if burndown %}
 <div class="card">
     {% include "partials/burndown_chart.html" %}
+</div>
+{% endif %}
+
+{# Planning vs Execution section #}
+{% if start_snapshot is defined and start_snapshot %}
+<div class="card">
+    <div class="card-header">
+        <h2>Planning vs Execution</h2>
+    </div>
+    <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="stat">
+            <div class="stat-value">{{ start_snapshot.total_issues }}</div>
+            <div class="stat-label">Committed at start</div>
+            <div class="stat-sub" style="color: var(--text-muted); font-size: 0.8rem;">~{{ start_snapshot.total_points }} pts</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{{ sprint.total }}</div>
+            <div class="stat-label">Current total</div>
+            <div class="stat-sub" style="color: var(--text-muted); font-size: 0.8rem;">~{{ sprint.total_points }} pts</div>
+        </div>
+        <div class="stat">
+            {% set scope_change = sprint.total - start_snapshot.total_issues %}
+            <div class="stat-value" style="{% if scope_change > 0 %}color: var(--warning);{% elif scope_change < 0 %}color: var(--success);{% endif %}">
+                {% if scope_change > 0 %}+{% endif %}{{ scope_change }}
+            </div>
+            <div class="stat-label">Scope change</div>
+            {% set pts_change = sprint.total_points - start_snapshot.total_points %}
+            <div class="stat-sub" style="color: var(--text-muted); font-size: 0.8rem;">
+                {% if pts_change > 0 %}+{% endif %}{{ pts_change }} pts
+            </div>
+        </div>
+    </div>
+
+    {% if end_snapshot is defined and end_snapshot %}
+    {# Sprint is closed — show completion stats #}
+    {% set committed_issues = start_snapshot.issue_numbers %}
+    {% set committed_closed = [] %}
+    {% set added_issues = [] %}
+    {% set added_closed = [] %}
+    {% for issue in sprint.issues %}
+        {% if issue.number in committed_issues %}
+            {% if issue.state == 'closed' %}
+                {% set _ = committed_closed.append(issue.number) %}
+            {% endif %}
+        {% else %}
+            {% set _ = added_issues.append(issue.number) %}
+            {% if issue.state == 'closed' %}
+                {% set _ = added_closed.append(issue.number) %}
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+    <div style="border-top: 1px solid var(--primary); margin-top: 1rem; padding-top: 1rem;">
+        <div class="grid" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="stat">
+                <div class="stat-value">{{ committed_closed|length }}/{{ committed_issues|length }}</div>
+                <div class="stat-label">Committed completed</div>
+                {% if committed_issues|length > 0 %}
+                <div class="stat-sub" style="color: var(--text-muted); font-size: 0.8rem;">
+                    {{ (committed_closed|length / committed_issues|length * 100)|int }}%
+                </div>
+                {% endif %}
+            </div>
+            {% if added_issues|length > 0 %}
+            <div class="stat">
+                <div class="stat-value">{{ added_closed|length }}/{{ added_issues|length }}</div>
+                <div class="stat-label">Added mid-sprint completed</div>
+                <div class="stat-sub" style="color: var(--text-muted); font-size: 0.8rem;">
+                    {{ (added_closed|length / added_issues|length * 100)|int }}%
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 

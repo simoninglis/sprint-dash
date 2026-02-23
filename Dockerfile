@@ -41,10 +41,16 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY app/ ./app/
 COPY templates/ ./templates/
 
+# Create data directory for SQLite
+RUN mkdir -p /data
+
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app /data
 USER appuser
+
+# Persistent volume for sprint database
+VOLUME /data
 
 # Build info (passed from CI)
 ARG GIT_SHA=unknown

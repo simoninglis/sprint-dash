@@ -1086,6 +1086,35 @@ class GiteaClient:
         ready_issues = self._get_issues(state="open", labels="ready")
         return [i for i in ready_issues if i.sprint is None]
 
+    def get_all_issues(self, *, state: str = "all") -> list[Issue]:
+        """Get all issues, optionally filtered by state.
+
+        Uses the internal cached fetch. Intended for migration and bulk operations.
+        """
+        return list(self._get_issues(state=state))
+
+    def get_issues_by_numbers(
+        self, numbers: list[int], *, state: str = "all"
+    ) -> list[Issue]:
+        """Get issues matching a list of issue numbers.
+
+        Filters from the cached all-issues list (no extra API calls).
+
+        Args:
+            numbers: Issue numbers to fetch.
+            state: Filter by state ('open', 'closed', 'all').
+
+        Returns:
+            List of matching issues, preserving the input order where possible.
+        """
+        if not numbers:
+            return []
+        all_issues = self._get_issues(state=state)
+        number_set = set(numbers)
+        by_number = {i.number: i for i in all_issues if i.number in number_set}
+        # Return in input order, skipping missing issues
+        return [by_number[n] for n in numbers if n in by_number]
+
     def search_issues(self, query: str) -> list[Issue]:
         """Search issues by title or issue number (client-side filter).
 

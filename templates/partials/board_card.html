@@ -1,6 +1,7 @@
 {# Board card - expects 'issue' to be a BoardIssue #}
 <div class="board-card card-{{ issue.state }} {% if issue.is_blocked %}card-blocked{% elif issue.needs_polish and issue.state == 'open' %}card-polish{% endif %}"
      style="--epic-color: {{ issue.epic_color }};"
+     data-issue-number="{{ issue.number }}"
      hx-get="{{ repo_url('/issues/' ~ issue.number) }}"
      hx-target="#content"
      hx-push-url="true">
@@ -67,6 +68,33 @@
         <span class="dep-badge dep-blocks" title="Blocks {{ issue.blocks_count }} issue(s)">
             &#x2192; {{ issue.blocks_count }}
         </span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# Quick-action buttons (visible on hover) #}
+    {% if issue.state == 'open' and current_sprint_num is defined %}
+    <div class="card-actions" onclick="event.stopPropagation();">
+        {% if issue.sprint and issue.sprint != current_sprint_num %}
+        <button class="card-action-btn"
+                title="Move to Sprint {{ current_sprint_num }}"
+                hx-post="{{ repo_url('/api/sprints/' ~ current_sprint_num ~ '/issues/' ~ issue.number) }}"
+                hx-vals='{"from_sprint": "{{ issue.sprint }}"}'
+                hx-target="#board-content"
+                hx-swap="innerHTML">&#x2192; S{{ current_sprint_num }}</button>
+        {% endif %}
+        {% if issue.sprint %}
+        <button class="card-action-btn"
+                title="Remove from sprint"
+                hx-delete="{{ repo_url('/api/sprints/' ~ issue.sprint ~ '/issues/' ~ issue.number) }}"
+                hx-target="#board-content"
+                hx-swap="innerHTML">&#x2715;</button>
+        {% elif current_sprint_num %}
+        <button class="card-action-btn"
+                title="Add to Sprint {{ current_sprint_num }}"
+                hx-post="{{ repo_url('/api/sprints/' ~ current_sprint_num ~ '/issues/' ~ issue.number) }}"
+                hx-target="#board-content"
+                hx-swap="innerHTML">&#x2192; S{{ current_sprint_num }}</button>
         {% endif %}
     </div>
     {% endif %}

@@ -57,7 +57,7 @@
                 {% endif %}
             </div>
         </div>
-        <div class="column-body">
+        <div class="column-body backlog-body" data-backlog="true">
             {% if ready_backlog %}
                 {% if group_by_epic %}
                     {% set epics_seen = {} %}
@@ -159,7 +159,7 @@
                 {% endif %}
             </div>
         </div>
-        <div class="column-body">
+        <div class="column-body" data-sprint-number="{{ sprint.number }}">
             {% if issues %}
                 {% if group_by_epic %}
                     {% set epics_seen = {} %}

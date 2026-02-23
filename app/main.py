@@ -1,7 +1,9 @@
 """Sprint Dashboard - FastAPI application."""
 
 import contextlib
+import logging
 import os
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -9,29 +11,41 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from .api import router as api_router
+from .database import close_db, get_db
 from .gitea import (
     BacklogStats,
+    BoardData,
     BurndownData,
+    BurndownPoint,
     CIHealth,
     ConfigError,
+    GiteaClient,
     GiteaError,
     NightlySummary,
+    Sprint,
+    _parse_closed_date,
     close_all_clients,
     get_base_client,
     get_client,
 )
 from .health import router as health_router
+from .sprint_store import SprintStore
 from .woodpecker import close_woodpecker_client, get_woodpecker_client
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Sprint Dashboard")
 app.include_router(health_router)
+app.include_router(api_router)
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Clean up cached clients on shutdown."""
+    """Clean up cached clients and database on shutdown."""
     close_all_clients()
     close_woodpecker_client()
+    close_db()
 
 
 # Templates
@@ -67,6 +81,141 @@ def make_context(
     }
 
 
+def _get_store(owner: str, repo: str) -> SprintStore:
+    """Get a repo-scoped SprintStore."""
+    return SprintStore(get_db(), owner, repo)
+
+
+def _build_sprint(
+    store: SprintStore,
+    client: GiteaClient,
+    sprint_number: int,
+) -> Sprint | None:
+    """Build a Sprint dataclass from DB metadata + Gitea issue details."""
+    row = store.get_sprint(sprint_number)
+    if not row:
+        return None
+    issue_numbers = store.get_issue_numbers(sprint_number)
+    issues = client.get_issues_by_numbers(issue_numbers)
+    return Sprint(
+        number=row["number"],
+        issues=tuple(issues),
+        lifecycle_state=row["status"],
+    )
+
+
+def _build_board_data(store: SprintStore, client: GiteaClient) -> BoardData:
+    """Build BoardData from SprintStore + GiteaClient.
+
+    Sprint membership comes from SQLite (instant).
+    Issue metadata comes from Gitea (cached 60s).
+    Backlog = open issues not assigned to any sprint.
+    """
+    all_sprints_rows = store.list_sprints()
+    assigned_numbers = store.get_all_assigned_numbers()
+
+    # Build Sprint objects
+    sprints: list[Sprint] = []
+    for row in all_sprints_rows:
+        issue_numbers = store.get_issue_numbers(row["number"])
+        issues = client.get_issues_by_numbers(issue_numbers)
+        sprints.append(
+            Sprint(
+                number=row["number"],
+                issues=tuple(issues),
+                lifecycle_state=row["status"],
+            )
+        )
+
+    # Backlog: open issues not in any sprint
+    all_open = client._get_issues(state="open")
+    backlog = [i for i in all_open if i.number not in assigned_numbers]
+
+    current_num = store.get_current_sprint_number()
+    # Fallback: if no in_progress sprint, pick lowest planned
+    if current_num is None:
+        planned = store.list_sprints(status="planned")
+        if planned:
+            current_num = planned[-1]["number"]  # lowest planned (list is desc)
+        elif sprints:
+            current_num = sprints[0].number  # most recent
+
+    return BoardData(
+        backlog=backlog,
+        sprints=sprints,
+        current_sprint_num=current_num,
+    )
+
+
+def _build_burndown(
+    store: SprintStore, client: GiteaClient, sprint_number: int
+) -> BurndownData | None:
+    """Build burndown data from store dates + Gitea issue details."""
+    row = store.get_sprint(sprint_number)
+    if not row or not row.get("start_date"):
+        return None
+
+    start = date.fromisoformat(row["start_date"])
+    if row.get("end_date"):
+        end = date.fromisoformat(row["end_date"])
+    else:
+        end = start + timedelta(days=13)  # Default 14-day sprint
+
+    today = date.today()
+    if today < start:
+        return None
+
+    chart_end = min(today, end)
+    issue_numbers = store.get_issue_numbers(sprint_number)
+    issues = client.get_issues_by_numbers(issue_numbers)
+
+    total_issues = len(issues)
+    total_points = sum(i.points for i in issues)
+    if total_issues == 0:
+        return None
+
+    # Pre-compute closed dates
+    closed_dates: list[tuple[date, int]] = []
+    for issue in issues:
+        closed_date = _parse_closed_date(issue.closed_at)
+        if closed_date is not None:
+            closed_dates.append((closed_date, issue.points))
+
+    sprint_days = (end - start).days + 1
+    points_list: list[BurndownPoint] = []
+    current = start
+    while current <= chart_end:
+        day_index = (current - start).days
+        closed_by_day = sum(1 for d, _ in closed_dates if d <= current)
+        closed_pts_by_day = sum(pts for d, pts in closed_dates if d <= current)
+
+        remaining_issues = total_issues - closed_by_day
+        remaining_points = total_points - closed_pts_by_day
+
+        ideal_issues = total_issues * (1 - day_index / (sprint_days - 1))
+        ideal_points = total_points * (1 - day_index / (sprint_days - 1))
+
+        points_list.append(
+            BurndownPoint(
+                day=current,
+                remaining_issues=remaining_issues,
+                remaining_points=remaining_points,
+                ideal_issues=round(ideal_issues, 1),
+                ideal_points=round(ideal_points, 1),
+            )
+        )
+        current += timedelta(days=1)
+
+    return BurndownData(
+        sprint_number=sprint_number,
+        start_date=start,
+        end_date=end,
+        total_issues=total_issues,
+        total_points=total_points,
+        points=tuple(points_list),
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def repo_picker(request: Request):
     """Repository picker - select which repo to view."""
@@ -93,10 +242,23 @@ async def repo_picker(request: Request):
 async def home(request: Request, owner: str, repo: str):
     """Dashboard home - shows current sprint and summary."""
     try:
+        store = _get_store(owner, repo)
         client = get_client(owner, repo)
-        sprints = client.get_sprints()
+
+        # Build sprints from store
+        sprint_rows = store.list_sprints()
+        sprints: list[Sprint] = []
+        for row in sprint_rows:
+            sprint = _build_sprint(store, client, row["number"])
+            if sprint:
+                sprints.append(sprint)
+
         current = sprints[0] if sprints else None
-        ready_queue = client.get_ready_queue()
+
+        # Ready queue: open issues with 'ready' label not in any sprint
+        assigned = store.get_all_assigned_numbers()
+        ready_issues = client._get_issues(state="open", labels="ready")
+        ready_queue = [i for i in ready_issues if i.number not in assigned]
     except (GiteaError, ConfigError) as e:
         return templates.TemplateResponse(
             "partials/error.html", {"request": request, "error": str(e)}
@@ -158,8 +320,9 @@ async def board(
 ):
     """Sprint board view - 5 columns: Backlog, Previous, Current, Next, Next+1."""
     try:
+        store = _get_store(owner, repo)
         client = get_client(owner, repo)
-        board_data = client.get_board_data()
+        board_data = _build_board_data(store, client)
     except (GiteaError, ConfigError) as e:
         return templates.TemplateResponse(
             "partials/error.html", {"request": request, "error": str(e)}
@@ -283,8 +446,9 @@ async def board_column(
 ):
     """Lazy-load a single board column."""
     try:
+        store = _get_store(owner, repo)
         client = get_client(owner, repo)
-        board_data = client.get_board_data()
+        board_data = _build_board_data(store, client)
     except (GiteaError, ConfigError) as e:
         return templates.TemplateResponse(
             "partials/error.html", {"request": request, "error": str(e)}
@@ -351,8 +515,14 @@ async def board_column(
 async def sprints_list(request: Request, owner: str, repo: str):
     """List all sprints."""
     try:
+        store = _get_store(owner, repo)
         client = get_client(owner, repo)
-        sprints = client.get_sprints()
+        sprint_rows = store.list_sprints()
+        sprints: list[Sprint] = []
+        for row in sprint_rows:
+            sprint = _build_sprint(store, client, row["number"])
+            if sprint:
+                sprints.append(sprint)
     except (GiteaError, ConfigError) as e:
         return templates.TemplateResponse(
             "partials/error.html", {"request": request, "error": str(e)}
@@ -371,19 +541,37 @@ async def sprints_list(request: Request, owner: str, repo: str):
 async def sprint_detail(request: Request, owner: str, repo: str, number: int):
     """Sprint detail view."""
     try:
+        store = _get_store(owner, repo)
         client = get_client(owner, repo)
-        sprint = client.get_sprint(number)
+        sprint = _build_sprint(store, client, number)
+        if sprint is None:
+            return templates.TemplateResponse(
+                "partials/error.html",
+                {"request": request, "error": f"Sprint {number} not found"},
+            )
     except (GiteaError, ConfigError) as e:
         return templates.TemplateResponse(
             "partials/error.html", {"request": request, "error": str(e)}
         )
 
-    # Fetch burndown data (suppressed errors)
+    # Fetch burndown data from store dates (suppressed errors)
     burndown: BurndownData | None = None
     with contextlib.suppress(Exception):
-        burndown = client.get_burndown_data(number)
+        burndown = _build_burndown(store, client, number)
 
-    context = make_context(request, owner, repo, sprint=sprint, burndown=burndown)
+    # Fetch snapshots for planning vs execution
+    start_snapshot = store.get_snapshot(number, "start")
+    end_snapshot = store.get_snapshot(number, "end")
+
+    context = make_context(
+        request,
+        owner,
+        repo,
+        sprint=sprint,
+        burndown=burndown,
+        start_snapshot=start_snapshot,
+        end_snapshot=end_snapshot,
+    )
 
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse("partials/sprint_detail.html", context)
@@ -431,8 +619,12 @@ async def backlog(
 ):
     """Backlog view with sorting and filtering."""
     try:
+        store = _get_store(owner, repo)
         client = get_client(owner, repo)
-        all_backlog = client.get_backlog()
+        # Backlog: open issues not in any sprint
+        assigned = store.get_all_assigned_numbers()
+        all_open = client._get_issues(state="open")
+        all_backlog = [i for i in all_open if i.number not in assigned]
     except (GiteaError, ConfigError) as e:
         return templates.TemplateResponse(
             "partials/error.html", {"request": request, "error": str(e)}

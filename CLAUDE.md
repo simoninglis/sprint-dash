@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-sprint-dash is a read-only FastAPI + HTMX dashboard for visualizing sprint and backlog data from Gitea. It provides sprint-centric views that Gitea's `sprint/N` label system lacks.
+sprint-dash is a FastAPI + HTMX dashboard for sprint tracking against Gitea repositories. Sprint structure (membership, lifecycle, dates) is owned by a local SQLite database, while issue metadata (title, labels, state) comes from Gitea. The dashboard provides sprint boards, backlog views, burndown charts, and planning-vs-execution tracking.
 
 ## Development Standards
 
@@ -37,6 +37,20 @@ poetry run mypy app/
 # Run tests
 poetry run pytest
 poetry run pytest --cov
+
+# Sprint CLI (sd-cli)
+sd-cli --json sprint list                          # List sprints
+sd-cli --json sprint show 47                       # Sprint details + issues
+sd-cli sprint create 48 --start 2026-03-09 --end 2026-03-23 --goal "Feature X"
+sd-cli sprint start 48                             # Set in_progress + snapshot
+sd-cli sprint close 47 --carry-over-to 48          # Close + carry over
+sd-cli sprint current                              # Current sprint number
+sd-cli issue add 48 101 102 103                    # Add issues to sprint
+sd-cli issue remove 48 101                         # Remove issue from sprint
+sd-cli issue list 48                               # List issue numbers
+
+# Migrate from Gitea labels/milestones to SQLite
+poetry run python -m app.migrate
 ```
 
 ## Configuration
@@ -61,18 +75,27 @@ Copy `.env.example` to `.env` and set:
 - `WOODPECKER_TOKEN` - Woodpecker personal access token (optional)
 - `GITEA_INSECURE=1` - Disable SSL verification for self-signed Gitea certs (optional)
 - `GITEA_CA_BUNDLE` - Path to custom CA bundle (alternative to GITEA_INSECURE)
+- `SPRINT_DASH_DB` - SQLite database path (default: `/data/sprint-dash.db`)
 
 ## Architecture
 
-**Data flow**: Gitea API → `GiteaClient` → typed dataclasses → FastAPI routes → Jinja2 templates
+**Data flow**: SQLite (sprint structure) + Gitea API (issue metadata) → FastAPI routes → Jinja2 templates
 
 **Key components**:
+- `app/database.py` - SQLite connection manager. WAL mode, foreign keys, schema init. Singleton connection via `get_db()`. Path from `SPRINT_DASH_DB` env var (default `/data/sprint-dash.db`).
+- `app/sprint_store.py` - `SprintStore` class — all sprint CRUD, repo-scoped by `(owner, repo)`. Manages sprints, sprint_issues (with soft-delete via `removed_at`), and snapshots.
+- `app/api.py` - Write endpoints (sprint CRUD, issue add/remove, carry-over, close). All return HTMX partials for in-place UI updates.
+- `app/migrate.py` - CLI migration: seeds SQLite from Gitea labels + milestones. Run once: `poetry run python -m app.migrate`.
 - `app/gitea.py` - Gitea API client with typed dataclasses (`Issue`, `Sprint`, `CIHealth`, `Milestone`, `BoardIssue`, etc.). Includes TTL caching (60s) and tea CLI config integration.
 - `app/woodpecker.py` - Woodpecker CI API client for pipeline health (`WoodpeckerClient`). Separate from Gitea client (different URL, token, auth). Provides `get_ci_health()` and `get_nightly_summary()`.
-- `app/main.py` - FastAPI routes. All routes check `HX-Request` header to return partials vs full pages.
-- `templates/` - Jinja2 templates using HTMX for interactivity. `base.html` contains all CSS (dark theme).
+- `app/main.py` - FastAPI routes. All routes check `HX-Request` header to return partials vs full pages. Uses `SprintStore` for sprint structure, `GiteaClient` for issue details.
+- `templates/` - Jinja2 templates using HTMX for interactivity. `base.html` contains all CSS (dark theme), Sortable.js for drag-and-drop.
 
 **HTMX pattern**: Routes return `partials/*.html` for HTMX requests, full templates otherwise.
+
+**Sprint data ownership**: Sprint membership, lifecycle, and dates are stored in SQLite (`sprints` + `sprint_issues` tables). Issue metadata (title, labels, assignees, state) comes from Gitea API with 60s cache. This separation means sprint operations are instant (no API calls) while issue data stays fresh.
+
+**Write operations**: Sprint CRUD, add/remove issues, carry-over, close with snapshot. All via form-encoded POST/PUT/DELETE endpoints in `app/api.py`. Drag-and-drop between board columns uses Sortable.js + HTMX.
 
 **Gitea APIs used**:
 
@@ -135,7 +158,9 @@ All workflows use `backend: local` (runs directly on the host, not Docker-in-Doc
 - `GITEA_INSECURE=1` (Gitea uses self-signed cert)
 - Woodpecker credentials (`WOODPECKER_URL`, `WOODPECKER_TOKEN`)
 
-**Health endpoint**: `GET /health` → `{"status": "ok", "git_sha": "<sha>"}`
+**Health endpoint**: `GET /health` → `{"status": "ok", "git_sha": "<sha>", "db": "ok"}`
+
+**Persistent data**: SQLite database at `/opt/sprint-dash/data/sprint-dash.db` (mounted as Docker volume `-v /opt/sprint-dash/data:/data`)
 
 **Secrets** (in Woodpecker repo settings): `ci_gitea_token` (for docker registry login)
 
@@ -145,9 +170,21 @@ All workflows use `backend: local` (runs directly on the host, not Docker-in-Doc
 - Woodpecker clone sets git remote to `prod-vm-gitea` URL — don't use `git fetch origin` in build steps
 - Trivy scan: starlette CVE-2024-47874 suppressed via `.trivyignore` (not exploitable, read-only app)
 
+## Database Schema
+
+Three main tables (see `app/database.py` for full DDL):
+
+| Table | Purpose |
+|-------|---------|
+| `sprints` | Sprint lifecycle — number, status, dates, goal. Scoped by `(repo_owner, repo_name)`. |
+| `sprint_issues` | Issue membership — which issues belong to which sprint. Soft-delete via `removed_at`. Source tracking (`migration`, `manual`, `rollover`). |
+| `sprint_snapshots` | Point-in-time captures at sprint start/end for planning-vs-execution analysis. |
+
+**Migration**: `poetry run python -m app.migrate` seeds from Gitea labels + milestones. Idempotent (UNIQUE constraints, INSERT OR IGNORE).
+
 ## Design Principles
 
-1. **Read-only** - Never modify Gitea data
+1. **Gitea is read-only** - Never modify Gitea data; sprint structure lives in SQLite
 2. **Server-rendered** - No JS framework, HTMX for interactivity
 3. **Parse at boundaries** - Gitea JSON → typed dataclasses immediately
-4. **Minimal dependencies** - FastAPI, httpx, Jinja2
+4. **Minimal dependencies** - FastAPI, httpx, Jinja2, stdlib sqlite3

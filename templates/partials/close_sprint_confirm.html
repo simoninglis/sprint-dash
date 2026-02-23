@@ -1,0 +1,59 @@
+{# Close sprint confirmation dialog with carry-over option #}
+<div class="modal-overlay" onclick="if(event.target===this)this.remove()">
+    <div class="modal-content">
+        <h3>Close Sprint {{ sprint.number }}</h3>
+
+        <div class="close-sprint-summary">
+            <div class="close-stat">
+                <strong>{{ sprint.closed_count }}/{{ sprint.total }}</strong> issues completed
+                ({{ sprint.progress_pct }}%)
+            </div>
+            {% if open_issues %}
+            <div class="close-stat close-warning">
+                <strong>{{ open_issues|length }}</strong> open issues remaining
+            </div>
+            {% endif %}
+        </div>
+
+        <form hx-post="{{ repo_url('/api/sprints/' ~ sprint.number ~ '/close') }}"
+              hx-target="#sprint-list-container"
+              hx-swap="innerHTML"
+              hx-on::after-request="this.closest('.modal-overlay').remove()">
+
+            {% if open_issues and next_sprint %}
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="carry-over-check"
+                           onchange="document.getElementById('carry-over-field').value = this.checked ? '{{ next_sprint.number }}' : '0';"
+                           checked>
+                    Carry over {{ open_issues|length }} open issues to Sprint {{ next_sprint.number }}
+                </label>
+                <input type="hidden" id="carry-over-field" name="carry_over_to" value="{{ next_sprint.number }}">
+            </div>
+
+            <details class="carry-over-details">
+                <summary>Issues to carry over</summary>
+                <ul class="carry-over-list">
+                    {% for issue in open_issues %}
+                    <li>#{{ issue.number }} — {{ issue.title }}</li>
+                    {% endfor %}
+                </ul>
+            </details>
+            {% else %}
+            <input type="hidden" name="carry_over_to" value="0">
+            {% if open_issues %}
+            <div class="close-warning">
+                No next sprint available for carry-over.
+                {{ open_issues|length }} open issues will remain unassigned.
+            </div>
+            {% endif %}
+            {% endif %}
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-accent">Close Sprint</button>
+                <button type="button" class="btn btn-secondary"
+                        onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>

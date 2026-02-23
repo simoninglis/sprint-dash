@@ -7,6 +7,9 @@
     <script src="https://unpkg.com/htmx.org@1.9.10"
             integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC"
             crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"
+            integrity="sha384-HZZ/fukV+9G8gwTNjN7zQDG0Sp7MsZy5DDN6VfY3Be7V9dvQpEpR2jF2HlyFUUjU"
+            crossorigin="anonymous"></script>
     <style>
         :root {
             --bg: #1a1a2e;
@@ -390,6 +393,125 @@
             font-size: 0.85rem;
             line-height: 1.4;
         }
+
+        /* Modal overlay */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0,0,0,0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: var(--surface);
+            border: 1px solid var(--primary);
+            border-radius: 8px;
+            padding: 1.5rem 2rem;
+            max-width: 500px;
+            width: 90%;
+        }
+        .modal-content h3 { margin-bottom: 1rem; color: var(--accent); }
+
+        /* Forms */
+        .form-group { margin-bottom: 0.75rem; }
+        .form-group label {
+            display: block;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+        .form-row {
+            display: flex;
+            gap: 0.75rem;
+        }
+        .form-row .form-group { flex: 1; }
+        .form-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background 0.2s, opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-secondary { background: var(--primary); color: var(--text); }
+        .btn-accent { background: var(--accent); color: #fff; }
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--primary);
+        }
+        .btn-ghost:hover { color: var(--text); border-color: var(--text-muted); }
+
+        /* Sprint action buttons */
+        .sprint-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Card quick-action buttons */
+        .card-actions {
+            display: flex;
+            gap: 0.25rem;
+            margin-top: 0.5rem;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .board-card:hover .card-actions { opacity: 1; }
+        .card-action-btn {
+            background: var(--primary);
+            border: none;
+            color: var(--text-muted);
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            cursor: pointer;
+        }
+        .card-action-btn:hover { color: var(--text); background: var(--accent); }
+
+        /* Drag-and-drop feedback */
+        .sortable-ghost { opacity: 0.4; }
+        .sortable-chosen { box-shadow: 0 0 0 2px var(--accent); }
+        .column-body.drop-target { background: rgba(233, 69, 96, 0.08); }
+
+        /* Close sprint dialog */
+        .close-sprint-summary { margin-bottom: 1rem; }
+        .close-stat { margin-bottom: 0.5rem; }
+        .close-warning { color: var(--warning); }
+        .carry-over-details { margin: 0.75rem 0; }
+        .carry-over-details summary { cursor: pointer; color: var(--text-muted); font-size: 0.85rem; }
+        .carry-over-list { list-style: none; margin-top: 0.5rem; }
+        .carry-over-list li { padding: 0.25rem 0; font-size: 0.85rem; color: var(--text-muted); }
+
+        /* Sprint edit form inline */
+        .sprint-edit-form { padding: 1rem 0; }
+        .sprint-edit-form .form-group input[type="text"],
+        .sprint-edit-form .form-group input[type="date"],
+        .sprint-edit-form .form-group select {
+            max-width: 300px;
+        }
+
+        /* Error flash */
+        .error-flash {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
     </style>
 </head>
 <body>
@@ -512,6 +634,104 @@
                     e.preventDefault();
                     location.href = prefix + routes[e.key];
                 }
+            }
+        });
+    })();
+    </script>
+
+    {# Modal container for HTMX-loaded dialogs #}
+    <div id="modal-container"></div>
+
+    {# Sortable.js board initialization — runs after HTMX content swaps #}
+    <script>
+    (function() {
+        function repoPrefix() {
+            var m = location.pathname.match(/^\/([^\/]+)\/([^\/]+)/);
+            return m ? '/' + m[1] + '/' + m[2] : '';
+        }
+
+        function initSortable() {
+            if (typeof Sortable === 'undefined') return;
+
+            var columns = document.querySelectorAll('.column-body[data-sprint-number]');
+            columns.forEach(function(col) {
+                if (col._sortable) col._sortable.destroy();
+
+                col._sortable = new Sortable(col, {
+                    group: 'sprint-board',
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    chosenClass: 'sortable-chosen',
+                    draggable: '.board-card[data-issue-number]',
+                    onStart: function() {
+                        document.body.classList.add('dragging');
+                    },
+                    onEnd: function(evt) {
+                        document.body.classList.remove('dragging');
+
+                        var issueNum = evt.item.dataset.issueNumber;
+                        var toSprint = evt.to.dataset.sprintNumber;
+                        var fromSprint = evt.from.dataset.sprintNumber;
+
+                        if (!issueNum || !toSprint || fromSprint === toSprint) return;
+
+                        var prefix = repoPrefix();
+                        if (!prefix) return;
+
+                        var url = prefix + '/api/sprints/' + toSprint + '/issues/' + issueNum;
+                        var body = fromSprint ? 'from_sprint=' + fromSprint : '';
+
+                        htmx.ajax('POST', url, {
+                            target: '#board-content',
+                            swap: 'innerHTML',
+                            values: fromSprint ? { from_sprint: fromSprint } : {}
+                        });
+                    }
+                });
+            });
+
+            // Also make backlog sortable
+            var backlog = document.querySelector('.column-body.backlog-body[data-backlog]');
+            if (backlog) {
+                if (backlog._sortable) backlog._sortable.destroy();
+                backlog._sortable = new Sortable(backlog, {
+                    group: 'sprint-board',
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    chosenClass: 'sortable-chosen',
+                    draggable: '.board-card[data-issue-number]',
+                    onEnd: function(evt) {
+                        document.body.classList.remove('dragging');
+                        var issueNum = evt.item.dataset.issueNumber;
+                        var fromSprint = evt.from.dataset.sprintNumber;
+
+                        if (!issueNum || !fromSprint) return;
+
+                        var prefix = repoPrefix();
+                        if (!prefix) return;
+
+                        // Removing from sprint = moving to backlog
+                        htmx.ajax('DELETE', prefix + '/api/sprints/' + fromSprint + '/issues/' + issueNum, {
+                            target: '#board-content',
+                            swap: 'innerHTML'
+                        });
+                    }
+                });
+            }
+        }
+
+        // Init on page load and after HTMX swaps
+        document.addEventListener('DOMContentLoaded', initSortable);
+        document.addEventListener('htmx:afterSwap', function(evt) {
+            if (evt.detail.target.id === 'board-content' || evt.detail.target.id === 'content') {
+                setTimeout(initSortable, 50);
+            }
+        });
+
+        // Pause auto-refresh during drag
+        document.addEventListener('htmx:configRequest', function(evt) {
+            if (document.body.classList.contains('dragging')) {
+                evt.preventDefault();
             }
         });
     })();

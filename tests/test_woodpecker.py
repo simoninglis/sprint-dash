@@ -66,9 +66,7 @@ class TestWoodpeckerClientInit:
 
     def test_base_url_trailing_slash_stripped(self):
         with patch("app.woodpecker.httpx.Client"):
-            client = WoodpeckerClient(
-                base_url="http://localhost:9090/", token="tok"
-            )
+            client = WoodpeckerClient(base_url="http://localhost:9090/", token="tok")
             assert client.base_url == "http://localhost:9090"
 
 
@@ -160,12 +158,14 @@ class TestGetCIHealth:
     def test_success_all_workflows(self, mock_client):
         client, transport = mock_client
         pipelines = self._make_pipeline_list()
-        detail = self._make_pipeline_detail([
-            self._make_workflow("ci"),
-            self._make_workflow("build"),
-            self._make_workflow("staging-deploy"),
-            self._make_workflow("staging-verify"),
-        ])
+        detail = self._make_pipeline_detail(
+            [
+                self._make_workflow("ci"),
+                self._make_workflow("build"),
+                self._make_workflow("staging-deploy"),
+                self._make_workflow("staging-verify"),
+            ]
+        )
 
         responses = [
             # repo lookup
@@ -188,12 +188,14 @@ class TestGetCIHealth:
     def test_partial_failure(self, mock_client):
         client, transport = mock_client
         pipelines = self._make_pipeline_list()
-        detail = self._make_pipeline_detail([
-            self._make_workflow("ci", "success"),
-            self._make_workflow("build", "failure"),
-            self._make_workflow("staging-deploy", "blocked"),
-            self._make_workflow("staging-verify", "blocked"),
-        ])
+        detail = self._make_pipeline_detail(
+            [
+                self._make_workflow("ci", "success"),
+                self._make_workflow("build", "failure"),
+                self._make_workflow("staging-deploy", "blocked"),
+                self._make_workflow("staging-verify", "blocked"),
+            ]
+        )
 
         responses = [
             MagicMock(json=MagicMock(return_value={"id": 1})),
@@ -210,10 +212,12 @@ class TestGetCIHealth:
     def test_running_pipeline(self, mock_client):
         client, transport = mock_client
         pipelines = self._make_pipeline_list()
-        detail = self._make_pipeline_detail([
-            self._make_workflow("ci", "success"),
-            self._make_workflow("build", "running"),
-        ])
+        detail = self._make_pipeline_detail(
+            [
+                self._make_workflow("ci", "success"),
+                self._make_workflow("build", "running"),
+            ]
+        )
 
         responses = [
             MagicMock(json=MagicMock(return_value={"id": 1})),
@@ -260,12 +264,14 @@ class TestGetCIHealth:
     def test_cache_hit(self, mock_client):
         client, transport = mock_client
         pipelines = self._make_pipeline_list()
-        detail = self._make_pipeline_detail([
-            self._make_workflow("ci"),
-            self._make_workflow("build"),
-            self._make_workflow("staging-deploy"),
-            self._make_workflow("staging-verify"),
-        ])
+        detail = self._make_pipeline_detail(
+            [
+                self._make_workflow("ci"),
+                self._make_workflow("build"),
+                self._make_workflow("staging-deploy"),
+                self._make_workflow("staging-verify"),
+            ]
+        )
 
         responses = [
             MagicMock(json=MagicMock(return_value={"id": 1})),
@@ -289,10 +295,12 @@ class TestGetCIHealth:
         client, transport = mock_client
         pipelines = self._make_pipeline_list()
         # Only ci and build present — staging-deploy and staging-verify missing
-        detail = self._make_pipeline_detail([
-            self._make_workflow("ci"),
-            self._make_workflow("build"),
-        ])
+        detail = self._make_pipeline_detail(
+            [
+                self._make_workflow("ci"),
+                self._make_workflow("build"),
+            ]
+        )
 
         responses = [
             MagicMock(json=MagicMock(return_value={"id": 1})),

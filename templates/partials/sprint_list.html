@@ -1,3 +1,11 @@
+<div class="sprint-list-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <h2>Sprints</h2>
+    <button class="btn btn-primary btn-sm"
+            hx-get="{{ repo_url('/api/sprints/create-form') }}"
+            hx-target="#modal-container"
+            hx-swap="innerHTML">+ New Sprint</button>
+</div>
+<div id="sprint-list-container">
 <ul class="issue-list">
     {% for sprint in sprints %}
     <li class="issue-item">
@@ -14,15 +22,24 @@
             <div class="progress-fill" style="width: {{ sprint.progress_pct }}%"></div>
         </div>
         <span style="min-width: 50px; text-align: right;">{{ sprint.progress_pct }}%</span>
-        <a href="{{ repo_url('/sprints/' ~ sprint.number) }}"
-           hx-get="{{ repo_url('/sprints/' ~ sprint.number) }}"
-           hx-target="#content"
-           hx-push-url="true"
-           hx-indicator="closest .issue-item"
-           style="color: var(--accent);">View →</a>
+        <div class="sprint-actions">
+            <a href="{{ repo_url('/sprints/' ~ sprint.number) }}"
+               hx-get="{{ repo_url('/sprints/' ~ sprint.number) }}"
+               hx-target="#content"
+               hx-push-url="true"
+               hx-indicator="closest .issue-item"
+               style="color: var(--accent);">View</a>
+            {% if sprint.lifecycle_state == 'in_progress' %}
+            <button class="btn btn-ghost btn-sm"
+                    hx-get="{{ repo_url('/api/sprints/' ~ sprint.number ~ '/close-form') }}"
+                    hx-target="#modal-container"
+                    hx-swap="innerHTML">Close</button>
+            {% endif %}
+        </div>
         <span class="htmx-indicator"><div class="spinner"></div></span>
     </li>
     {% else %}
-    <li class="empty-state">No sprints found</li>
+    <li class="empty-state">No sprints found. Create one to get started.</li>
     {% endfor %}
 </ul>
+</div>

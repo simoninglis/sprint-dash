@@ -3,7 +3,10 @@ name = "sprint-dash"
 version = "0.1.0"
 description = "Lightweight sprint dashboard for Gitea"
 authors = ["singlis"]
-package-mode = false  # Application, not a library
+packages = [{include = "app"}]
+
+[tool.poetry.scripts]
+sd-cli = "app.cli:main"
 
 [tool.poetry.dependencies]
 python = "^3.12"

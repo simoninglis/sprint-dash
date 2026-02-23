@@ -1,0 +1,52 @@
+{# Inline sprint edit form — replaces sprint header on click #}
+<form class="sprint-edit-form"
+      hx-put="{{ repo_url('/api/sprints/' ~ sprint.number) }}"
+      hx-target="#content"
+      hx-swap="innerHTML">
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="edit-status">Status</label>
+            <select id="edit-status" name="status">
+                {# Only show valid transitions from current status #}
+                {% if sprint.status == 'planned' %}
+                <option value="planned" selected>Planned</option>
+                <option value="in_progress">In Progress</option>
+                <option value="cancelled">Cancelled</option>
+                {% elif sprint.status == 'in_progress' %}
+                <option value="in_progress" selected>In Progress</option>
+                <option value="cancelled">Cancelled</option>
+                {% else %}
+                {# completed/cancelled: frozen, show current only #}
+                <option value="{{ sprint.status }}" selected>{{ sprint.status | replace('_', ' ') | title }}</option>
+                {% endif %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="edit-start">Start Date</label>
+            <input type="date" id="edit-start" name="start_date"
+                   value="{{ sprint.start_date or '' }}">
+        </div>
+
+        <div class="form-group">
+            <label for="edit-end">End Date</label>
+            <input type="date" id="edit-end" name="end_date"
+                   value="{{ sprint.end_date or '' }}">
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="edit-goal">Goal</label>
+        <input type="text" id="edit-goal" name="goal"
+               value="{{ sprint.goal or '' }}" placeholder="Sprint goal">
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        <button type="button" class="btn btn-secondary btn-sm"
+                hx-get="{{ repo_url('/sprints/' ~ sprint.number) }}"
+                hx-target="#content"
+                hx-swap="innerHTML">Cancel</button>
+    </div>
+</form>
