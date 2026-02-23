@@ -18,9 +18,9 @@ ENV PATH="$POETRY_VENV/bin:$PATH"
 # Copy dependency files
 COPY pyproject.toml poetry.lock* ./
 
-# Install dependencies (without dev dependencies)
+# Install dependencies (without dev dependencies, without project itself)
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --without dev
+    && poetry install --no-interaction --no-ansi --without dev --no-root
 
 # Stage 2: Production
 FROM python:3.12-slim AS production
