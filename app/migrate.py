@@ -82,13 +82,23 @@ def _do_migrate(
             logger.debug("Sprint %d already exists, skipping", sprint_num)
             continue
 
+        # Direct SQL insert to bypass lifecycle enforcement — migration needs
+        # to seed historical sprints with their actual status (completed, etc.)
         try:
-            store.create_sprint(
-                sprint_num,
-                status=status,
-                start_date=start_date,
-                goal=milestone.description or "",
+            conn.execute(
+                """INSERT INTO sprints
+                   (repo_owner, repo_name, number, status, start_date, goal)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    resolved_owner,
+                    resolved_repo,
+                    sprint_num,
+                    status,
+                    start_date,
+                    milestone.description or "",
+                ),
             )
+            conn.commit()
             summary["sprints_created"] += 1
             logger.info(
                 "Created sprint %d (status=%s, start=%s)",
@@ -97,6 +107,7 @@ def _do_migrate(
                 start_date,
             )
         except Exception:
+            conn.rollback()
             summary["sprints_skipped"] += 1
             logger.warning("Failed to create sprint %d", sprint_num, exc_info=True)
 
@@ -115,15 +126,22 @@ def _do_migrate(
             # Ensure sprint exists (may have been created from label but no milestone)
             existing = store.get_sprint(issue.sprint)
             if not existing:
-                # Sprint found via label but no milestone — create as completed (historical)
+                # Sprint found via label but no milestone — insert as completed (historical)
                 try:
-                    store.create_sprint(issue.sprint, status="completed")
+                    conn.execute(
+                        """INSERT INTO sprints
+                           (repo_owner, repo_name, number, status)
+                           VALUES (?, ?, ?, 'completed')""",
+                        (resolved_owner, resolved_repo, issue.sprint),
+                    )
+                    conn.commit()
                     summary["orphan_sprints"] += 1
                     logger.info(
                         "Created orphan sprint %d (from label, no milestone)",
                         issue.sprint,
                     )
                 except Exception:
+                    conn.rollback()
                     logger.debug("Sprint %d already exists (race)", issue.sprint)
 
             # Add issue to sprint (skip if already present)
