@@ -34,6 +34,10 @@ steps:
       - echo "$${CI_GITEA_TOKEN}" | docker login gitea.internal.kellgari.com.au -u singlis --password-stdin
       - trap "rm -rf $$DOCKER_CONFIG_DIR" EXIT
 
+      # Ensure data directory exists with correct ownership (appuser = UID 1000)
+      - mkdir -p /opt/sprint-dash/data
+      - chown 1000:1000 /opt/sprint-dash/data
+
       # Pull new image
       - docker pull gitea.internal.kellgari.com.au/singlis/sprint-dash:$$SHORT_SHA
 
