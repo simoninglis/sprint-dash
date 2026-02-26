@@ -139,10 +139,10 @@ Configuration is loaded in order of precedence:
 
 ```bash
 # .env (or use tea CLI config for URL/token)
-GITEA_URL=https://gitea.internal.kellgari.com.au
+GITEA_URL=https://gitea.example.com
 GITEA_TOKEN=xxx
-GITEA_OWNER=singlis
-GITEA_REPO=deckengine
+GITEA_OWNER=your_org
+GITEA_REPO=your_repo
 ```
 
 ## CI Pipeline Health
@@ -180,7 +180,7 @@ The dashboard shows CI pipeline status for the current sprint via the **Gitea Ac
 ## Running
 
 ```bash
-cd /home/singlis/work/sprint-dash
+cd sprint-dash
 pip install -e .
 cp .env.example .env
 # Edit .env with Gitea token
