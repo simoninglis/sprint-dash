@@ -17,11 +17,27 @@ Gitea's built-in issue tracker is great, but it doesn't give you sprint-centric 
 - **Search** — Live search with label and state filters
 - **CLI** — `sd-cli` for terminal-based sprint operations
 
-## Screenshot
+## Screenshots
 
 Dark theme, server-rendered, designed for planning sessions on a second monitor.
 
-<!-- TODO: Add screenshot -->
+### Board View
+
+Kanban columns with sprint progress, CI pipeline status from Woodpecker, and epic grouping.
+
+![Board view](docs/screenshots/board.png)
+
+### Backlog
+
+Priority-sorted backlog with size estimates, type and epic labels, and filters.
+
+![Backlog](docs/screenshots/backlog.png)
+
+### Epics
+
+Epic progress tracking with sprint-by-sprint breakdown, point totals, and completion percentage.
+
+![Epics](docs/screenshots/epics.png)
 
 ## Stack
 
