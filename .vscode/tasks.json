@@ -1,0 +1,11 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Prepare Python Environment",
+            "type": "shell",
+            "command": "echo 'Setting up environment variables or starting services...'",
+            "problemMatcher": []
+        }
+    ]
+}

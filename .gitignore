@@ -8,3 +8,5 @@ dist/
 .coverage
 htmlcov/
 .ruff_cache/
+.env
+.vscode/sprint-dash.db*

@@ -330,6 +330,8 @@ class Issue:
                 "epic",
             ):
                 return label
+            if label.startswith("type/"):
+                return label.split("/", 1)[1]
         return "unknown"
 
     @property
@@ -365,7 +367,7 @@ class Issue:
     def priority(self) -> int | None:
         """Extract priority from labels (P1=highest, P3=lowest)."""
         for label in self.labels:
-            if match := re.match(r"P([1-3])$", label):
+            if match := re.match(r"priority/(\d+)", label):
                 return int(match.group(1))
         return None
 

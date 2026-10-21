@@ -62,7 +62,9 @@ cp .env.example .env
 # Edit .env with your Gitea URL and token
 
 # Run
+pip install .
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+uv run python -m debugpy --listen 5678 --wait-for-client -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
 If you have [tea CLI](https://gitea.com/gitea/tea) configured, sprint-dash picks up your credentials from `~/.config/tea/config.yml` automatically. Just set `GITEA_OWNER` and `GITEA_REPO`.
@@ -85,6 +87,7 @@ If you've been tracking sprints with Gitea labels (`sprint/N`) or milestones:
 
 ```bash
 uv run python -m app.migrate
+uv run python -m debugpy --listen 5678 --wait-for-client -m app.migrate
 ```
 
 This seeds the SQLite database from your existing Gitea data. Run once, then manage sprints through the dashboard or CLI.
